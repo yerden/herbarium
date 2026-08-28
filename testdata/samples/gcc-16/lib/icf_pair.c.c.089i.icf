@@ -1,0 +1,151 @@
+Dump after hash based groups
+Congruence classes: 1 with total: 2 items (in a non-singular class: 2)
+Class size histogram [number of members]: number of classes
+     2:      1
+Dump after WPA based types groups
+Congruence classes: 1 with total: 2 items (in a non-singular class: 2)
+Class size histogram [number of members]: number of classes
+     2:      1
+Worklist has been filled with: 0
+Address reference subdivision created: 0 new classes.
+Dump after callgraph-based congruence reduction
+Congruence classes: 1 with total: 2 items (in a non-singular class: 2)
+Class size histogram [number of members]: number of classes
+     2:      1
+Init called for 2 items (100.00%).
+Dump after full equality comparison of groups
+Congruence classes: 1 with total: 2 items (in a non-singular class: 2)
+Class size histogram [number of members]: number of classes
+     2:      1
+Worklist has been filled with: 0
+Address reference subdivision created: 0 new classes.
+Congruence classes: 1 with total: 2 items (in a non-singular class: 2)
+Class size histogram [number of members]: number of classes
+     2:      1
+
+Item count: 2
+Congruent classes before: 1, after: 1
+Average class size before: 2.00, after: 2.00
+Average non-singular class size: 2.00, count: 1
+Equal symbols: 1
+Totally needed symbols: 2, fraction of loaded symbols: 100.00%
+
+Introduced new external node (icf_add_one.localalias/3).
+
+Symbols to be put in SSA form
+{ D.2312 D.2326 D.2327 }
+Incremental SSA update started at block: 0
+Number of blocks in CFG: 3
+Number of blocks to update: 2 ( 67%)
+
+
+
+Analyzing function: icf_bump_by_one/2
+;; 1 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2
+;; 2 succs { 1 }
+
+Analyzing function body size: icf_bump_by_one/2
+
+IPA function summary for icf_bump_by_one/2 inlinable
+  global time:     14.000000
+  self size:       6
+  global size:     0
+  min size:       0
+  self stack:      0
+  global stack:    0
+    size:0.000000, time:0.000000
+    size:3.000000, time:2.000000,  executed if:(not inlined)
+  calls:
+    icf_add_one/1 function not considered for inlining
+      freq:1.00 loop depth: 0 size: 3 time: 12 callee size: 2 stack: 0
+
+Creating summary for icf_bump_by_one/2:
+  Descriptor for parameter 0 xD.2312
+    unused with 1 call_uses
+    not a candidate
+----------------------------------------
+  Descriptor for parameter 0 xD.2312
+    (locally) unused
+    not a candidate for splitting
+
+
+
+Analyzing function: icf_bump_by_one/2
+;; 1 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2
+;; 2 succs { 1 }
+
+Analyzing function body size: icf_bump_by_one/2
+
+IPA function summary for icf_bump_by_one/2 inlinable
+  global time:     14.000000
+  self size:       6
+  global size:     6
+  min size:       0
+  self stack:      0
+  global stack:    0
+    size:0.000000, time:0.000000
+    size:3.000000, time:2.000000,  executed if:(not inlined)
+  calls:
+    icf_add_one/1 function not considered for inlining
+      freq:1.00 loop depth: 0 size: 3 time: 12 callee size: 2 stack: 0
+
+
+
+ local analysis of icf_bump_by_one/2
+   scanning: retval.2_4 = icf_add_one.localalias (x_2(D)); [tail call]
+  scanning: return retval.2_4;
+Function is locally const.
+
+
+modref analyzing 'icf_bump_by_one/2' (ipa=1)
+Analyzing flags of ssa name: x_2(D)
+  Analyzing stmt: retval.2_4 = icf_add_one.localalias (x_2(D)); [tail call]
+    Analyzing flags of ssa name: retval.2_4
+      Analyzing stmt: return retval.2_4;
+      current flags of retval.2_4 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+    flags of ssa name retval.2_4 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+  current flags of x_2(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+flags of ssa name x_2(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+Always executed bbbs (assuming return or EH): 2
+ - modref done with result: tracked.
+  loads:
+  stores:
+  Try dse
+  parm 0 flags: no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+
+Reclaiming functions:
+Reclaiming variables:
+Clearing address taken flags:
+int icf_bump_by_one (int x)
+{
+  int retval.2;
+
+  <bb 2> [local count: 1073741824]:
+  retval.2_4 = icf_add_one.localalias (x_2(D)); [tail call]
+  return retval.2_4;
+
+}
+
+
+int icf_add_one (int x)
+{
+  int _2;
+
+  <bb 2> [local count: 1073741824]:
+  # DEBUG BEGIN_STMT
+  _2 = x_1(D) + 1;
+  return _2;
+
+}
+
+

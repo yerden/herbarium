@@ -1,0 +1,83 @@
+Dump after hash based groups
+Congruence classes: 2 with total: 2 items (in a non-singular class: 0)
+Class size histogram [number of members]: number of classes
+     1:      2
+Dump after WPA based types groups
+Congruence classes: 2 with total: 2 items (in a non-singular class: 0)
+Class size histogram [number of members]: number of classes
+     1:      2
+Worklist has been filled with: 1
+Address reference subdivision created: 0 new classes.
+Dump after callgraph-based congruence reduction
+Congruence classes: 2 with total: 2 items (in a non-singular class: 0)
+Class size histogram [number of members]: number of classes
+     1:      2
+Init called for 0 items (0.00%).
+Dump after full equality comparison of groups
+Congruence classes: 2 with total: 2 items (in a non-singular class: 0)
+Class size histogram [number of members]: number of classes
+     1:      2
+Worklist has been filled with: 1
+Address reference subdivision created: 0 new classes.
+Congruence classes: 2 with total: 2 items (in a non-singular class: 0)
+Class size histogram [number of members]: number of classes
+     1:      2
+
+Item count: 2
+Congruent classes before: 2, after: 2
+Average class size before: 1.00, after: 1.00
+Average non-singular class size: 0.00, count: 0
+Equal symbols: 0
+Totally needed symbols: 0, fraction of loaded symbols: 0.00%
+
+int main (int argc, char * * argv)
+{
+  int r;
+  int _6;
+  int _9;
+
+  <bb 2> [local count: 1073741824]:
+  # DEBUG BEGIN_STMT
+  # DEBUG BEGIN_STMT
+  r_4 = compute (argc_2(D), 3);
+  # DEBUG r => r_4
+  # DEBUG BEGIN_STMT
+  _6 = use_dispatch (2, 5);
+  r_7 = r_4 + _6;
+  # DEBUG r => r_7
+  # DEBUG BEGIN_STMT
+  _9 = hook (r_7);
+  r_10 = r_7 + _9;
+  # DEBUG r => r_10
+  # DEBUG BEGIN_STMT
+  printf ("app1: %d\n", r_10);
+  # DEBUG BEGIN_STMT
+  return 0;
+
+}
+
+
+int use_dispatch (int a, int b)
+{
+  int p;
+  int s;
+  int (*<T4f1>) (int, int) _1;
+  int (*<T4f1>) (int, int) _2;
+  int _10;
+
+  <bb 2> [local count: 1073741824]:
+  # DEBUG BEGIN_STMT
+  _1 = g_ops.add;
+  s_7 = _1 (a_4(D), b_5(D));
+  # DEBUG s => s_7
+  # DEBUG BEGIN_STMT
+  _2 = g_ops.mul;
+  p_9 = _2 (a_4(D), b_5(D));
+  # DEBUG p => p_9
+  # DEBUG BEGIN_STMT
+  _10 = s_7 + p_9;
+  return _10;
+
+}
+
+

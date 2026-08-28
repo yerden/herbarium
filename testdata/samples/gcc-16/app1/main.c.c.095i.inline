@@ -1,0 +1,241 @@
+IPA function summary for use_dispatch.constprop/10 inlinable
+  global time:     41.000000
+  self size:       18
+  global size:     18
+  min size:       15
+  self stack:      0
+  global stack:    0
+    size:3.000000, time:3.000000
+    size:3.000000, time:2.000000,  executed if:(not inlined)
+  calls:
+    indirect call loop depth: 0 freq:1.00 size: 6 time: 18
+    indirect call loop depth: 0 freq:1.00 size: 6 time: 18
+
+IPA function summary for main/5 inlinable
+  global time:     54.000000
+  self size:       19
+  global size:     19
+  min size:       16
+  self stack:      0
+  global stack:    0
+    size:2.000000, time:2.000000
+    size:3.000000, time:2.000000,  executed if:(not inlined)
+  calls:
+    printf/8 function body not available
+      freq:1.00 loop depth: 0 size: 3 time: 12
+       op0 is compile time invariant
+    hook/7 function body not available
+      freq:1.00 loop depth: 0 size: 3 time: 12
+    use_dispatch.constprop/10 function not considered for inlining
+      freq:1.00 loop depth: 0 size: 4 time: 13 callee size: 9 stack: 0
+       op0 is compile time invariant
+       op1 is compile time invariant
+    compute/6 function body not available
+      freq:1.00 loop depth: 0 size: 4 time: 13
+       op1 is compile time invariant
+
+
+Flattening functions:
+Overall time estimate: 95.000000 weighted by profile: 0.000000
+
+Deciding on inlining of small functions.  Starting with size 37.
+Enqueueing calls in use_dispatch.constprop/10.
+Enqueueing calls in main/5.
+
+Considering use_dispatch.constprop/10 with 18 size
+ to be inlined into main/5 in ../app1/main.c:14
+ Estimated badness is -0.181818, frequency 1.00.
+  Parm map:  -1 -1
+Updated mod-ref summary for main/5
+  loads:
+  stores:
+  Nondeterministic
+  Try dse
+  parm 1 flags: unused
+New minimal size reached: 30
+node context cache: 0 hits, 0 misses, 1 initializations
+
+Reclaiming functions:
+Reclaiming variables:
+Clearing address taken flags:
+
+Deciding on functions to be inlined into all callers and removing useless speculations:
+Overall time estimate: 80.000000 weighted by profile: 0.000000
+
+Why inlining failed?
+function body not available                       :        3 calls, 3.000000 freq, 0 count
+IPA function summary for main/5 inlinable
+  global time:     80.000000
+  self size:       19
+  global size:     30
+  min size:       27
+  self stack:      0
+  global stack:    0
+    size:5.000000, time:5.000000
+    size:3.000000, time:2.000000,  executed if:(not inlined)
+  calls:
+    printf/8 function body not available
+      freq:1.00 loop depth: 0 size: 3 time: 12
+       op0 is compile time invariant
+    hook/7 function body not available
+      freq:1.00 loop depth: 0 size: 3 time: 12
+    use_dispatch.constprop/10 inlined
+      freq:1.00
+      Stack frame offset 0, callee self size 0
+      indirect call loop depth: 0 freq:1.00 size: 6 time: 18
+      indirect call loop depth: 0 freq:1.00 size: 6 time: 18
+    compute/6 function body not available
+      freq:1.00 loop depth: 0 size: 4 time: 13
+       op1 is compile time invariant
+
+Symbol table:
+
+use_dispatch.constprop.0/10 (use_dispatch.constprop)
+  Type: function definition analyzed
+  Visibility:
+  References: g_ops/9 (read) g_ops/9 (read) 
+  Referring: 
+  Function use_dispatch.constprop/10 is inline copy in main/5
+  Clone of use_dispatch/4
+  Availability: local
+  Function flags: count:1073741824 (estimated locally) local executed_once
+  Called by: main/5 (inlined) (1073741824 (estimated locally),1.00 per call) 
+  Calls: 
+       indirect simple callsite, not calling a known parameter, flags 0, num speculative call targets: 0
+       indirect simple callsite, not calling a known parameter, flags 0, num speculative call targets: 0
+g_ops/9 (g_ops)
+  Type: variable
+  Body removed by symtab_remove_unreachable_nodes
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: use_dispatch.constprop.0/10 (read) use_dispatch.constprop.0/10 (read) 
+  Availability: not_available
+  Varpool flags: read-only
+printf/8 (printf)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Availability: not_available
+  Function flags:
+  Called by: main/5 (1073741824 (estimated locally),1.00 per call) 
+  Calls: 
+hook/7 (hook)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Availability: not_available
+  Function flags:
+  Called by: main/5 (1073741824 (estimated locally),1.00 per call) 
+  Calls: 
+compute/6 (compute)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Availability: not_available
+  Function flags:
+  Called by: main/5 (1073741824 (estimated locally),1.00 per call) 
+  Calls: 
+main/5 (main)
+  Type: function definition analyzed
+  Visibility: externally_visible semantic_interposition public
+  References: 
+  Referring: 
+  Availability: available
+  Function flags: count:1073741824 (estimated locally) body only_called_at_startup executed_once
+  Called by: 
+  Calls: printf/8 (1073741824 (estimated locally),1.00 per call) hook/7 (1073741824 (estimated locally),1.00 per call) use_dispatch.constprop.0/10 (inlined) (1073741824 (estimated locally),1.00 per call) compute/6 (1073741824 (estimated locally),1.00 per call) 
+use_dispatch/4 (use_dispatch)
+  Type: function
+  Body removed by symtab_remove_unreachable_nodes
+  Visibility: semantic_interposition prevailing_def_ironly
+  References: 
+  Referring: 
+  Availability: not_available
+  Function flags: count:1073741824 (estimated locally) body executed_once
+  Called by: 
+  Calls: 
+
+;; Function main (main, funcdef_no=4, decl_uid=2628, cgraph_uid=5, symbol_order=4) (executed once)
+
+;; 1 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1
+
+Symbols to be put in SSA form
+{ D.2643 }
+Incremental SSA update started at block: 0
+Number of blocks in CFG: 4
+Number of blocks to update: 3 ( 75%)
+
+
+
+Symbols to be put in SSA form
+{ D.2639 D.2653 }
+Incremental SSA update started at block: 0
+Number of blocks in CFG: 6
+Number of blocks to update: 5 ( 83%)
+
+
+Merging blocks 2 and 4
+Merging blocks 2 and 5
+Merging blocks 2 and 3
+int main (int argc, char * * argv)
+{
+  int p;
+  int s;
+  int D.2653;
+  int r;
+  int _6;
+  int _9;
+  int (*<T4f1>) (int, int) _12;
+  int (*<T4f1>) (int, int) _14;
+  int _16;
+  int _19;
+
+  <bb 2> [local count: 1073741824]:
+  # DEBUG BEGIN_STMT
+  # DEBUG BEGIN_STMT
+  r_4 = compute (argc_2(D), 3);
+  # DEBUG r => r_4
+  # DEBUG BEGIN_STMT
+  # DEBUG D#1 => 2
+  # DEBUG D#2 => 5
+  # DEBUG INLINE_ENTRY use_dispatch
+  # DEBUG b => 5
+  # DEBUG a => 2
+  # DEBUG BEGIN_STMT
+  _12 = g_ops.add;
+  s_13 = _12 (2, 5);
+  # DEBUG s => s_13
+  # DEBUG BEGIN_STMT
+  _14 = g_ops.mul;
+  p_15 = _14 (2, 5);
+  # DEBUG p => p_15
+  # DEBUG BEGIN_STMT
+  _16 = s_13 + p_15;
+  _19 = _16;
+  # DEBUG s => NULL
+  # DEBUG p => NULL
+  # DEBUG a => NULL
+  # DEBUG b => NULL
+  _6 = _19;
+  r_7 = r_4 + _6;
+  # DEBUG r => r_7
+  # DEBUG BEGIN_STMT
+  _9 = hook (r_7);
+  r_10 = r_7 + _9;
+  # DEBUG r => r_10
+  # DEBUG BEGIN_STMT
+  printf ("app1: %d\n", r_10);
+  # DEBUG BEGIN_STMT
+  return 0;
+
+}
+
+

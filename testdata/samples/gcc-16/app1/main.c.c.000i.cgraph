@@ -1,0 +1,433 @@
+Trivially needed symbols: main/5
+
+
+Initial Symbol table:
+
+g_ops/9 (g_ops)
+  Type: variable
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: use_dispatch/4 (read) use_dispatch/4 (read) 
+  Availability: not-ready
+  Varpool flags: read-only
+printf/8 (printf)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Function flags:
+  Called by: main/5 
+  Calls: 
+hook/7 (hook)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Function flags:
+  Called by: main/5 
+  Calls: 
+compute/6 (compute)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Function flags:
+  Called by: main/5 
+  Calls: 
+main/5 (main)
+  Type: function definition analyzed
+  Visibility: semantic_interposition public
+  Aux: @0x331ee60
+  References: 
+  Referring: 
+  Function flags: body
+  Called by: 
+  Calls: printf/8 hook/7 use_dispatch/4 compute/6 
+use_dispatch/4 (use_dispatch)
+  Type: function definition analyzed
+  Visibility: semantic_interposition
+  Aux: @0x331ee60
+  References: g_ops/9 (read) g_ops/9 (read) 
+  Referring: 
+  Function flags: body
+  Called by: main/5 
+  Calls: 
+       indirect simple callsite, not calling a known parameter, flags 0, num speculative call targets: 0
+       indirect simple callsite, not calling a known parameter, flags 0, num speculative call targets: 0
+putchar/3 (putchar)
+  Type: function definition
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Function flags:
+  Called by: 
+  Calls: 
+getchar/2 (getchar)
+  Type: function definition
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Function flags:
+  Called by: 
+  Calls: 
+vprintf/1 (vprintf)
+  Type: function definition
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Function flags:
+  Called by: 
+  Calls: 
+
+Removing unused symbols: putchar/3 getchar/2 vprintf/1
+
+Reclaimed Symbol table:
+
+g_ops/9 (g_ops)
+  Type: variable
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: use_dispatch/4 (read) use_dispatch/4 (read) 
+  Availability: not-ready
+  Varpool flags: read-only
+printf/8 (printf)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Function flags:
+  Called by: main/5 
+  Calls: 
+hook/7 (hook)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Function flags:
+  Called by: main/5 
+  Calls: 
+compute/6 (compute)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Function flags:
+  Called by: main/5 
+  Calls: 
+main/5 (main)
+  Type: function definition analyzed
+  Visibility: semantic_interposition public
+  References: 
+  Referring: 
+  Function flags: body
+  Called by: 
+  Calls: printf/8 hook/7 use_dispatch/4 compute/6 
+use_dispatch/4 (use_dispatch)
+  Type: function definition analyzed
+  Visibility: semantic_interposition
+  References: g_ops/9 (read) g_ops/9 (read) 
+  Referring: 
+  Function flags: body
+  Called by: main/5 
+  Calls: 
+       indirect simple callsite, not calling a known parameter, flags 0, num speculative call targets: 0
+       indirect simple callsite, not calling a known parameter, flags 0, num speculative call targets: 0
+
+
+Initial Symbol table:
+
+g_ops/9 (g_ops)
+  Type: variable
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: use_dispatch/4 (read) use_dispatch/4 (read) 
+  Availability: not-ready
+  Varpool flags: read-only
+printf/8 (printf)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Function flags:
+  Called by: main/5 
+  Calls: 
+hook/7 (hook)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Function flags:
+  Called by: main/5 
+  Calls: 
+compute/6 (compute)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Function flags:
+  Called by: main/5 
+  Calls: 
+main/5 (main)
+  Type: function definition analyzed
+  Visibility: semantic_interposition public
+  References: 
+  Referring: 
+  Function flags: body
+  Called by: 
+  Calls: printf/8 hook/7 use_dispatch/4 compute/6 
+use_dispatch/4 (use_dispatch)
+  Type: function definition analyzed
+  Visibility: semantic_interposition
+  References: g_ops/9 (read) g_ops/9 (read) 
+  Referring: 
+  Function flags: body
+  Called by: main/5 
+  Calls: 
+       indirect simple callsite, not calling a known parameter, flags 0, num speculative call targets: 0
+       indirect simple callsite, not calling a known parameter, flags 0, num speculative call targets: 0
+
+Removing unused symbols:
+
+Reclaimed Symbol table:
+
+g_ops/9 (g_ops)
+  Type: variable
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: use_dispatch/4 (read) use_dispatch/4 (read) 
+  Availability: not-ready
+  Varpool flags: read-only
+printf/8 (printf)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Function flags:
+  Called by: main/5 
+  Calls: 
+hook/7 (hook)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Function flags:
+  Called by: main/5 
+  Calls: 
+compute/6 (compute)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Function flags:
+  Called by: main/5 
+  Calls: 
+main/5 (main)
+  Type: function definition analyzed
+  Visibility: semantic_interposition public
+  References: 
+  Referring: 
+  Function flags: body
+  Called by: 
+  Calls: printf/8 hook/7 use_dispatch/4 compute/6 
+use_dispatch/4 (use_dispatch)
+  Type: function definition analyzed
+  Visibility: semantic_interposition
+  References: g_ops/9 (read) g_ops/9 (read) 
+  Referring: 
+  Function flags: body
+  Called by: main/5 
+  Calls: 
+       indirect simple callsite, not calling a known parameter, flags 0, num speculative call targets: 0
+       indirect simple callsite, not calling a known parameter, flags 0, num speculative call targets: 0
+
+Reclaiming functions:
+Reclaiming variables:
+Clearing address taken flags:
+Optimized Symbol table:
+
+use_dispatch.constprop.0/10 (use_dispatch.constprop)
+  Type: function definition analyzed
+  Visibility:
+  References: g_ops/9 (read) g_ops/9 (read) 
+  Referring: 
+  Function use_dispatch.constprop/10 is inline copy in main/5
+  Clone of use_dispatch/4
+  Availability: local
+  Function flags: count:1073741824 (estimated locally) local executed_once
+  Called by: main/5 (inlined) (1073741824 (estimated locally),1.00 per call) 
+  Calls: 
+       indirect simple callsite, not calling a known parameter, flags 0, num speculative call targets: 0
+       indirect simple callsite, not calling a known parameter, flags 0, num speculative call targets: 0
+g_ops/9 (g_ops)
+  Type: variable
+  Body removed by symtab_remove_unreachable_nodes
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: use_dispatch.constprop.0/10 (read) use_dispatch.constprop.0/10 (read) 
+  Availability: not_available
+  Varpool flags: read-only
+printf/8 (printf)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Availability: not_available
+  Function flags:
+  Called by: main/5 (1073741824 (estimated locally),1.00 per call) 
+  Calls: 
+hook/7 (hook)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Availability: not_available
+  Function flags:
+  Called by: main/5 (1073741824 (estimated locally),1.00 per call) 
+  Calls: 
+compute/6 (compute)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Availability: not_available
+  Function flags:
+  Called by: main/5 (1073741824 (estimated locally),1.00 per call) 
+  Calls: 
+main/5 (main)
+  Type: function definition analyzed
+  Visibility: externally_visible semantic_interposition public
+  References: 
+  Referring: 
+  Availability: available
+  Function flags: count:1073741824 (estimated locally) body only_called_at_startup executed_once
+  Called by: 
+  Calls: printf/8 (1073741824 (estimated locally),1.00 per call) hook/7 (1073741824 (estimated locally),1.00 per call) use_dispatch.constprop.0/10 (inlined) (1073741824 (estimated locally),1.00 per call) compute/6 (1073741824 (estimated locally),1.00 per call) 
+use_dispatch/4 (use_dispatch)
+  Type: function
+  Body removed by symtab_remove_unreachable_nodes
+  Visibility: semantic_interposition prevailing_def_ironly
+  References: 
+  Referring: 
+  Availability: not_available
+  Function flags: count:1073741824 (estimated locally) body executed_once
+  Called by: 
+  Calls: 
+cloning use_dispatch/4 to use_dispatch.constprop/10
+    replace map: 0 -> 2, 1 -> 5
+    m_always_copy_start: 2
+int use_dispatch (int a, int b)
+{
+  int p;
+  int s;
+  int (*<T4f1>) (int, int) _1;
+  int (*<T4f1>) (int, int) _2;
+  int _10;
+
+  <bb 2> [local count: 1073741824]:
+  # DEBUG BEGIN_STMT
+  _1 = g_ops.add;
+  s_7 = _1 (a_4(D), b_5(D));
+  # DEBUG s => s_7
+  # DEBUG BEGIN_STMT
+  _2 = g_ops.mul;
+  p_9 = _2 (a_4(D), b_5(D));
+  # DEBUG p => p_9
+  # DEBUG BEGIN_STMT
+  _10 = s_7 + p_9;
+  return _10;
+
+}
+
+
+int use_dispatch.constprop ()
+{
+  int s;
+  int p;
+  int a;
+  int b;
+  int (*<T4f1>) (int, int) _1;
+  int (*<T4f1>) (int, int) _3;
+  int _5;
+
+  <bb 3> [local count: 1073741824]:
+  # DEBUG b => 5
+  # DEBUG a => 2
+
+  <bb 2> [local count: 1073741824]:
+  # DEBUG BEGIN_STMT
+  _1 = g_ops.add;
+  s_2 = _1 (2, 5);
+  # DEBUG s => s_2
+  # DEBUG BEGIN_STMT
+  _3 = g_ops.mul;
+  p_4 = _3 (2, 5);
+  # DEBUG p => p_4
+  # DEBUG BEGIN_STMT
+  _5 = s_2 + p_4;
+  return _5;
+
+}
+
+
+updating call of main/5 -> use_dispatch.constprop/10: _6 = use_dispatch (2, 5);
+    m_always_copy_start: 2
+  updated to:_6 = use_dispatch.constprop ();
+Trivially needed variables:
+Removing variables:
+
+Final Symbol table:
+
+g_ops/9 (g_ops)
+  Type: variable
+  Body removed by symtab_remove_unreachable_nodes
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Availability: not_available
+  Varpool flags: read-only
+printf/8 (printf)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Availability: not_available
+  Function flags:
+  Called by: 
+  Calls: 
+hook/7 (hook)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Availability: not_available
+  Function flags:
+  Called by: 
+  Calls: 
+compute/6 (compute)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Availability: not_available
+  Function flags:
+  Called by: 
+  Calls: 
+main/5 (main)
+  Type: function definition analyzed
+  Visibility: externally_visible semantic_interposition asm_written public
+  References: 
+  Referring: 
+  Availability: available
+  Function flags: count:1073741824 (estimated locally) only_called_at_startup executed_once
+  Called by: 
+  Calls: 
+use_dispatch/4 (use_dispatch)
+  Type: function
+  Body removed by symtab_remove_unreachable_nodes
+  Visibility: semantic_interposition prevailing_def_ironly
+  References: 
+  Referring: 
+  Availability: not_available
+  Function flags: count:1073741824 (estimated locally) executed_once
+  Called by: 
+  Calls: 

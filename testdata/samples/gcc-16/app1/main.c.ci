@@ -1,0 +1,12 @@
+graph: { title: "../app1/main.c"
+node: { title: "main" label: "main\n../app1/main.c:11:5\n32 bytes (static)\n0 dynamic objects" }
+node: { title: "compute" label: "compute\n../lib/shared_utils.h:6:5" shape : ellipse }
+edge: { sourcename: "main" targetname: "compute" label: "../app1/main.c:13:13" }
+node: { title: "__indirect_call" label: "Indirect Call Placeholder" shape : ellipse }
+edge: { sourcename: "main" targetname: "__indirect_call" label: "../app1/main.c:6:13" }
+edge: { sourcename: "main" targetname: "__indirect_call" label: "../app1/main.c:7:13" }
+node: { title: "hook" label: "hook\n../lib/shared_utils.h:7:5" shape : ellipse }
+edge: { sourcename: "main" targetname: "hook" label: "../app1/main.c:15:10" }
+node: { title: "printf" label: "printf\n/usr/include/stdio.h:370:12" shape : ellipse }
+edge: { sourcename: "main" targetname: "printf" label: "../app1/main.c:16:5" }
+}

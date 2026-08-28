@@ -1,0 +1,186 @@
+Trivially needed symbols: g_ops/1
+
+
+Initial Symbol table:
+
+mul_ints/3 (mul_ints)
+  Type: function
+  Visibility: semantic_interposition external public
+  Address is taken.
+  References: 
+  Referring: g_ops/1 (addr) 
+  Function flags:
+  Called by: 
+  Calls: 
+add_ints/2 (add_ints)
+  Type: function
+  Visibility: semantic_interposition external public
+  Address is taken.
+  References: 
+  Referring: g_ops/1 (addr) 
+  Function flags:
+  Called by: 
+  Calls: 
+g_ops/1 (g_ops)
+  Type: variable definition analyzed
+  Visibility: semantic_interposition public
+  Aux: @0x331ee60
+  References: add_ints/2 (addr) mul_ints/3 (addr) 
+  Referring: 
+  Availability: not-ready
+  Varpool flags: initialized read-only const-value-known
+
+Removing unused symbols:
+
+Reclaimed Symbol table:
+
+mul_ints/3 (mul_ints)
+  Type: function
+  Visibility: semantic_interposition external public
+  Address is taken.
+  References: 
+  Referring: g_ops/1 (addr) 
+  Function flags:
+  Called by: 
+  Calls: 
+add_ints/2 (add_ints)
+  Type: function
+  Visibility: semantic_interposition external public
+  Address is taken.
+  References: 
+  Referring: g_ops/1 (addr) 
+  Function flags:
+  Called by: 
+  Calls: 
+g_ops/1 (g_ops)
+  Type: variable definition analyzed
+  Visibility: semantic_interposition public
+  References: add_ints/2 (addr) mul_ints/3 (addr) 
+  Referring: 
+  Availability: not-ready
+  Varpool flags: initialized read-only const-value-known
+
+
+Initial Symbol table:
+
+mul_ints/3 (mul_ints)
+  Type: function
+  Visibility: semantic_interposition external public
+  Address is taken.
+  References: 
+  Referring: g_ops/1 (addr) 
+  Function flags:
+  Called by: 
+  Calls: 
+add_ints/2 (add_ints)
+  Type: function
+  Visibility: semantic_interposition external public
+  Address is taken.
+  References: 
+  Referring: g_ops/1 (addr) 
+  Function flags:
+  Called by: 
+  Calls: 
+g_ops/1 (g_ops)
+  Type: variable definition analyzed
+  Visibility: semantic_interposition public
+  References: add_ints/2 (addr) mul_ints/3 (addr) 
+  Referring: 
+  Availability: not-ready
+  Varpool flags: initialized read-only const-value-known
+
+Removing unused symbols:
+
+Reclaimed Symbol table:
+
+mul_ints/3 (mul_ints)
+  Type: function
+  Visibility: semantic_interposition external public
+  Address is taken.
+  References: 
+  Referring: g_ops/1 (addr) 
+  Function flags:
+  Called by: 
+  Calls: 
+add_ints/2 (add_ints)
+  Type: function
+  Visibility: semantic_interposition external public
+  Address is taken.
+  References: 
+  Referring: g_ops/1 (addr) 
+  Function flags:
+  Called by: 
+  Calls: 
+g_ops/1 (g_ops)
+  Type: variable definition analyzed
+  Visibility: semantic_interposition public
+  References: add_ints/2 (addr) mul_ints/3 (addr) 
+  Referring: 
+  Availability: not-ready
+  Varpool flags: initialized read-only const-value-known
+
+Reclaiming functions:
+Reclaiming variables:
+Clearing address taken flags:
+Optimized Symbol table:
+
+mul_ints/3 (mul_ints)
+  Type: function
+  Visibility: semantic_interposition external public
+  Address is taken.
+  References: 
+  Referring: g_ops/1 (addr) 
+  Availability: not_available
+  Function flags:
+  Called by: 
+  Calls: 
+add_ints/2 (add_ints)
+  Type: function
+  Visibility: semantic_interposition external public
+  Address is taken.
+  References: 
+  Referring: g_ops/1 (addr) 
+  Availability: not_available
+  Function flags:
+  Called by: 
+  Calls: 
+g_ops/1 (g_ops)
+  Type: variable definition analyzed
+  Visibility: externally_visible semantic_interposition public
+  References: add_ints/2 (addr) mul_ints/3 (addr) 
+  Referring: 
+  Availability: overwritable
+  Varpool flags: initialized read-only const-value-known
+Trivially needed variables: g_ops/1
+Removing variables:
+
+Final Symbol table:
+
+mul_ints/3 (mul_ints)
+  Type: function
+  Visibility: semantic_interposition external public
+  Address is taken.
+  References: 
+  Referring: g_ops/1 (addr) 
+  Availability: not_available
+  Function flags:
+  Called by: 
+  Calls: 
+add_ints/2 (add_ints)
+  Type: function
+  Visibility: semantic_interposition external public
+  Address is taken.
+  References: 
+  Referring: g_ops/1 (addr) 
+  Availability: not_available
+  Function flags:
+  Called by: 
+  Calls: 
+g_ops/1 (g_ops)
+  Type: variable definition analyzed
+  Visibility: externally_visible semantic_interposition asm_written public
+  Aux: @0x1
+  References: add_ints/2 (addr) mul_ints/3 (addr) 
+  Referring: 
+  Availability: overwritable
+  Varpool flags: initialized read-only const-value-known

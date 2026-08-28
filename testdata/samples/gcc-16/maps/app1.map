@@ -1,0 +1,690 @@
+Archive member included to satisfy reference by file (symbol)
+
+lib/libshared.a.p/shared_utils.c.o
+                              app1/app1.p/main.c.o (compute)
+lib/libshared.a.p/dispatch_impls.c.o
+                              app1/app1.p/main.c.o (g_ops)
+lib/libshared.a.p/icf_pair.c.o
+                              app1/app1.p/main.c.o (icf_add_one)
+
+Merging program properties
+
+Removed property 0xc0000002 to merge /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o (0x3) and app1/app1.p/main.c.o (not found)
+Updated property 0xc0010002 (0x1) to merge /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o (0x1) and lib/libshared.a.p/dispatch_impls.c.o (0x0)
+Updated property 0xc0010002 (0x1) to merge /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o (0x1) and /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtendS.o (0x0)
+Removed property 0xc0000002 to merge /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o (not found) and /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtendS.o (0x3)
+Removed property 0xc0000002 to merge /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o (not found) and /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/crtn.o (0x3)
+
+As-needed library included to satisfy reference by file (symbol)
+
+libc.so.6                     /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o (__libc_start_main@@GLIBC_2.34)
+
+Discarded input sections
+
+ .data          0x0000000000000000        0x4 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ .bss           0x0000000000000000        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ .rodata.cst4   0x0000000000000000        0x4 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ .text          0x0000000000000000        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/crti.o
+ .data          0x0000000000000000        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/crti.o
+ .bss           0x0000000000000000        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/crti.o
+ .note.gnu.property
+                0x0000000000000000       0x50 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/crti.o
+ .data          0x0000000000000000        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtbeginS.o
+ .note.gnu.property
+                0x0000000000000000       0x50 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtbeginS.o
+ .text          0x0000000000000000        0x0 app1/app1.p/main.c.o
+ .data          0x0000000000000000        0x0 app1/app1.p/main.c.o
+ .bss           0x0000000000000000        0x0 app1/app1.p/main.c.o
+ .note.gnu.property
+                0x0000000000000000       0x30 app1/app1.p/main.c.o
+ .text          0x0000000000000000        0x0 app1/app1.p/strong_override.c.o
+ .data          0x0000000000000000        0x0 app1/app1.p/strong_override.c.o
+ .bss           0x0000000000000000        0x0 app1/app1.p/strong_override.c.o
+ .note.gnu.property
+                0x0000000000000000       0x30 app1/app1.p/strong_override.c.o
+ .text          0x0000000000000000        0x0 lib/libshared.a.p/shared_utils.c.o
+ .data          0x0000000000000000        0x0 lib/libshared.a.p/shared_utils.c.o
+ .bss           0x0000000000000000        0x0 lib/libshared.a.p/shared_utils.c.o
+ .text.never_called
+                0x0000000000000000        0x1 lib/libshared.a.p/shared_utils.c.o
+ .note.gnu.property
+                0x0000000000000000       0x30 lib/libshared.a.p/shared_utils.c.o
+ .text          0x0000000000000000        0x0 lib/libshared.a.p/dispatch_impls.c.o
+ .data          0x0000000000000000        0x0 lib/libshared.a.p/dispatch_impls.c.o
+ .bss           0x0000000000000000        0x0 lib/libshared.a.p/dispatch_impls.c.o
+ .note.gnu.property
+                0x0000000000000000       0x30 lib/libshared.a.p/dispatch_impls.c.o
+ .text          0x0000000000000000        0x0 lib/libshared.a.p/icf_pair.c.o
+ .data          0x0000000000000000        0x0 lib/libshared.a.p/icf_pair.c.o
+ .bss           0x0000000000000000        0x0 lib/libshared.a.p/icf_pair.c.o
+ .note.gnu.property
+                0x0000000000000000       0x30 lib/libshared.a.p/icf_pair.c.o
+ .text          0x0000000000000000        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtendS.o
+ .data          0x0000000000000000        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtendS.o
+ .bss           0x0000000000000000        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtendS.o
+ .note.gnu.property
+                0x0000000000000000       0x50 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtendS.o
+ .text          0x0000000000000000        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/crtn.o
+ .data          0x0000000000000000        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/crtn.o
+ .bss           0x0000000000000000        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/crtn.o
+ .note.gnu.property
+                0x0000000000000000       0x50 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/crtn.o
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/crti.o
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtbeginS.o
+LOAD app1/app1.p/main.c.o
+LOAD app1/app1.p/strong_override.c.o
+LOAD lib/libshared.a
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/libgcc.a
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/libgcc_s_asneeded.so
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/libgcc_s.so
+START GROUP
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/libgcc_s.so.1
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/libgcc.a
+END GROUP
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/libatomic_asneeded.so
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/libatomic.so
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/libc.so
+START GROUP
+LOAD /usr/lib/libc.so.6
+LOAD /usr/lib/libc_nonshared.a
+LOAD /usr/lib/ld-linux-x86-64.so.2
+END GROUP
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/libgcc.a
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/libgcc_s_asneeded.so
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/libgcc_s.so
+START GROUP
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/libgcc_s.so.1
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/libgcc.a
+END GROUP
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtendS.o
+LOAD /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/crtn.o
+                [!provide]                        PROVIDE (__executable_start = SEGMENT_START ("text-segment", 0x0))
+                0x0000000000000388                . = (SEGMENT_START ("text-segment", 0x0) + SIZEOF_HEADERS)
+
+.note.gnu.build-id
+                0x0000000000000388       0x24
+ *(.note.gnu.build-id)
+ .note.gnu.build-id
+                0x0000000000000388       0x24 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+
+.interp         0x00000000000003ac       0x1c
+ *(.interp)
+ .interp        0x00000000000003ac       0x1c /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+
+.hash
+ *(.hash)
+
+.gnu.hash       0x00000000000003c8       0x1c
+ *(.gnu.hash)
+ .gnu.hash      0x00000000000003c8       0x1c /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+
+.dynsym         0x00000000000003e8       0xa8
+ *(.dynsym)
+ .dynsym        0x00000000000003e8       0xa8 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+
+.dynstr         0x0000000000000490       0x8f
+ *(.dynstr)
+ .dynstr        0x0000000000000490       0x8f /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+
+.gnu.version    0x0000000000000520        0xe
+ *(.gnu.version)
+ .gnu.version   0x0000000000000520        0xe /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+
+.gnu.version_d  0x0000000000000530        0x0
+ *(.gnu.version_d)
+ .gnu.version_d
+                0x0000000000000530        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+
+.gnu.version_r  0x0000000000000530       0x30
+ *(.gnu.version_r)
+ .gnu.version_r
+                0x0000000000000530       0x30 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+
+.rela.dyn       0x0000000000000560      0x108
+ *(.rela.init)
+ *(.rela.text .rela.text.* .rela.gnu.linkonce.t.*)
+ *(.rela.fini)
+ *(.rela.rodata .rela.rodata.* .rela.gnu.linkonce.r.*)
+ *(.rela.data .rela.data.* .rela.gnu.linkonce.d.*)
+ .rela.data.rel.ro
+                0x0000000000000560        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ .rela.data.rel.local
+                0x0000000000000560       0x18 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ .rela.data.rel.ro.g_ops
+                0x0000000000000578       0x48 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ *(.rela.tdata .rela.tdata.* .rela.gnu.linkonce.td.*)
+ *(.rela.tbss .rela.tbss.* .rela.gnu.linkonce.tb.*)
+ *(.rela.ctors)
+ *(.rela.dtors)
+ *(.rela.got)
+ .rela.got      0x00000000000005c0       0x78 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ *(.rela.tls)
+ .rela.tls      0x0000000000000638        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ *(.rela.bss .rela.bss.* .rela.gnu.linkonce.b.*)
+ .rela.bss      0x0000000000000638        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ *(.rela.ldata .rela.ldata.* .rela.gnu.linkonce.l.*)
+ *(.rela.lbss .rela.lbss.* .rela.gnu.linkonce.lb.*)
+ *(.rela.lrodata .rela.lrodata.* .rela.gnu.linkonce.lr.*)
+ *(.rela.ifunc)
+ .rela.ifunc    0x0000000000000638        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ .rela.fini_array
+                0x0000000000000638       0x18 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ .rela.init_array
+                0x0000000000000650       0x18 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+
+.rela.plt       0x0000000000000668       0x18
+ *(.rela.plt)
+ .rela.plt      0x0000000000000668       0x18 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ *(.rela.iplt)
+
+.relr.dyn
+ *(.relr.dyn)
+                0x0000000000001000                . = ALIGN (CONSTANT (MAXPAGESIZE))
+
+.init           0x0000000000001000       0x1b
+ *(SORT_NONE(.init))
+ .init          0x0000000000001000       0x16 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/crti.o
+                0x0000000000001000                _init
+ .init          0x0000000000001016        0x5 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/crtn.o
+
+.plt            0x0000000000001020       0x20
+ *(.plt)
+ .plt           0x0000000000001020       0x20 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+                0x0000000000001030                printf@@GLIBC_2.2.5
+ *(.iplt)
+
+.plt.got        0x0000000000001040        0x0
+ *(.plt.got)
+ .plt.got       0x0000000000001040        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+
+.plt.sec
+ *(.plt.sec)
+
+.text           0x0000000000001040      0x1e4
+ *(.text.unlikely .text.*_unlikely .text.unlikely.*)
+ *(.text.exit .text.exit.*)
+ *(.text.startup .text.startup.*)
+ .text.startup.main
+                0x0000000000001040       0x6b app1/app1.p/main.c.o
+                0x0000000000001040                main
+ *(.text.hot .text.hot.*)
+ *(SORT_BY_NAME(.text.sorted.*))
+ *(.text .stub .text.* .gnu.linkonce.t.*)
+ *fill*         0x00000000000010ab        0x5 
+ .text          0x00000000000010b0       0x26 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+                0x00000000000010b0                _start
+ *fill*         0x00000000000010d6        0xa 
+ .text          0x00000000000010e0       0xc9 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtbeginS.o
+ *fill*         0x00000000000011a9        0x7 
+ .text.hook     0x00000000000011b0        0x6 app1/app1.p/strong_override.c.o
+                0x00000000000011b0                hook
+ *fill*         0x00000000000011b6        0xa 
+ .text.add_ints
+                0x00000000000011c0        0x4 lib/libshared.a.p/shared_utils.c.o
+                0x00000000000011c0                add_ints
+ *fill*         0x00000000000011c4        0xc 
+ .text.mul_ints
+                0x00000000000011d0        0x6 lib/libshared.a.p/shared_utils.c.o
+                0x00000000000011d0                mul_ints
+ *fill*         0x00000000000011d6        0xa 
+ .text.compute  0x00000000000011e0       0x29 lib/libshared.a.p/shared_utils.c.o
+                0x00000000000011e0                compute
+ *fill*         0x0000000000001209        0x7 
+ .text.icf_add_one
+                0x0000000000001210        0x4 lib/libshared.a.p/icf_pair.c.o
+                0x0000000000001210                icf_add_one
+ *fill*         0x0000000000001214        0xc 
+ .text.icf_bump_by_one
+                0x0000000000001220        0x4 lib/libshared.a.p/icf_pair.c.o
+                0x0000000000001220                icf_bump_by_one
+ *(.gnu.warning)
+
+.fini           0x0000000000001224        0xd
+ *(SORT_NONE(.fini))
+ .fini          0x0000000000001224        0x8 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/crti.o
+                0x0000000000001224                _fini
+ .fini          0x000000000000122c        0x5 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/crtn.o
+                [!provide]                        PROVIDE (__etext = .)
+                [!provide]                        PROVIDE (_etext = .)
+                [!provide]                        PROVIDE (etext = .)
+                0x0000000000002000                . = ALIGN (CONSTANT (MAXPAGESIZE))
+                0x0000000000002000                . = SEGMENT_START ("rodata-segment", (ALIGN (CONSTANT (MAXPAGESIZE)) + (. & (CONSTANT (MAXPAGESIZE) - 0x1))))
+
+.rodata         0x0000000000002000       0x16
+ *(.rodata .rodata.* .gnu.linkonce.r.*)
+ .rodata.main.str1.1
+                0x0000000000002000       0x16 app1/app1.p/main.c.o
+                                          0xa (size before relaxing)
+ .rodata.str1.1
+                0x0000000000002016        0x0 lib/libshared.a.p/dispatch_impls.c.o
+                                          0xc (size before relaxing)
+
+.rodata1
+ *(.rodata1)
+
+.eh_frame_hdr   0x0000000000002018       0x54
+ *(.eh_frame_hdr)
+ .eh_frame_hdr  0x0000000000002018       0x54 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+                0x0000000000002018                __GNU_EH_FRAME_HDR
+ *(.eh_frame_entry .eh_frame_entry.*)
+
+.eh_frame       0x0000000000002070      0x10c
+ *(.eh_frame)
+ .eh_frame      0x0000000000002070       0x30 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+                                         0x2c (size before relaxing)
+ *fill*         0x00000000000020a0        0x0 
+ .eh_frame      0x00000000000020a0       0x28 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+                                         0x40 (size before relaxing)
+ .eh_frame      0x00000000000020c8        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ .eh_frame      0x00000000000020c8       0x28 app1/app1.p/main.c.o
+                                         0x40 (size before relaxing)
+ .eh_frame      0x00000000000020f0       0x18 app1/app1.p/strong_override.c.o
+                                         0x30 (size before relaxing)
+ .eh_frame      0x0000000000002108       0x48 lib/libshared.a.p/shared_utils.c.o
+                                         0x78 (size before relaxing)
+ .eh_frame      0x0000000000002150       0x28 lib/libshared.a.p/icf_pair.c.o
+                                         0x40 (size before relaxing)
+ .eh_frame      0x0000000000002178        0x4 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtendS.o
+ *(.eh_frame.*)
+
+.sframe         0x0000000000002180       0x36
+ *(.sframe)
+ .sframe        0x0000000000002180       0x36 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ *(.sframe.*)
+
+.gcc_except_table
+ *(.gcc_except_table .gcc_except_table.*)
+
+.gnu_extab
+ *(.gnu_extab*)
+
+.exception_ranges
+ *(.exception_ranges*)
+
+.note.build-id
+ *(.note.build-id)
+
+.note.GNU-stack
+                0x00000000000021b6        0x0
+ *(.note.GNU-stack)
+ .note.GNU-stack
+                0x00000000000021b6        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ .note.GNU-stack
+                0x00000000000021b6        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/crti.o
+ .note.GNU-stack
+                0x00000000000021b6        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtbeginS.o
+ .note.GNU-stack
+                0x00000000000021b6        0x0 app1/app1.p/main.c.o
+ .note.GNU-stack
+                0x00000000000021b6        0x0 app1/app1.p/strong_override.c.o
+ .note.GNU-stack
+                0x00000000000021b6        0x0 lib/libshared.a.p/shared_utils.c.o
+ .note.GNU-stack
+                0x00000000000021b6        0x0 lib/libshared.a.p/dispatch_impls.c.o
+ .note.GNU-stack
+                0x00000000000021b6        0x0 lib/libshared.a.p/icf_pair.c.o
+ .note.GNU-stack
+                0x00000000000021b6        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtendS.o
+ .note.GNU-stack
+                0x00000000000021b6        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/crtn.o
+
+.note.gnu.property
+                0x00000000000021b8       0x40
+ *(.note.gnu.property)
+ .note.gnu.property
+                0x00000000000021b8       0x40 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+
+.note.ABI-tag   0x00000000000021f8       0x20
+ *(.note.ABI-tag)
+ .note.ABI-tag  0x00000000000021f8       0x20 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+
+.note.package
+ *(.note.package)
+
+.note.dlopen
+ *(.note.dlopen)
+
+.note.netbsd.ident
+ *(.note.netbsd.ident)
+
+.note.openbsd.ident
+ *(.note.openbsd.ident)
+                0x0000000000003db0                . = DATA_SEGMENT_ALIGN (CONSTANT (MAXPAGESIZE), CONSTANT (COMMONPAGESIZE))
+
+.eh_frame
+ *(.eh_frame)
+ *(.eh_frame.*)
+
+.sframe
+ *(.sframe)
+ *(.sframe.*)
+
+.gnu_extab
+ *(.gnu_extab)
+
+.gcc_except_table
+ *(.gcc_except_table .gcc_except_table.*)
+
+.exception_ranges
+ *(.exception_ranges*)
+
+.tdata          0x0000000000003db0        0x0
+                [!provide]                        PROVIDE (__tdata_start = .)
+ *(.tdata .tdata.* .gnu.linkonce.td.*)
+
+.tbss
+ *(.tbss .tbss.* .gnu.linkonce.tb.*)
+ *(.tcommon)
+
+.preinit_array  0x0000000000003db0        0x0
+                [!provide]                        PROVIDE (__preinit_array_start = .)
+ *(.preinit_array)
+                [!provide]                        PROVIDE (__preinit_array_end = .)
+
+.init_array     0x0000000000003db0        0x8
+                [!provide]                        PROVIDE (__init_array_start = .)
+ *(SORT_BY_INIT_PRIORITY(.init_array.*) SORT_BY_INIT_PRIORITY(.ctors.*))
+ *(.init_array EXCLUDE_FILE(*crtend?.o *crtend.o *crtbegin?.o *crtbegin.o) .ctors)
+ .init_array    0x0000000000003db0        0x8 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtbeginS.o
+                [!provide]                        PROVIDE (__init_array_end = .)
+
+.fini_array     0x0000000000003db8        0x8
+                [!provide]                        PROVIDE (__fini_array_start = .)
+ *(SORT_BY_INIT_PRIORITY(.fini_array.*) SORT_BY_INIT_PRIORITY(.dtors.*))
+ *(.fini_array EXCLUDE_FILE(*crtend?.o *crtend.o *crtbegin?.o *crtbegin.o) .dtors)
+ .fini_array    0x0000000000003db8        0x8 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtbeginS.o
+                [!provide]                        PROVIDE (__fini_array_end = .)
+
+.ctors
+ *crtbegin.o(.ctors)
+ *crtbegin?.o(.ctors)
+ *(EXCLUDE_FILE(*crtend?.o *crtend.o) .ctors)
+ *(SORT_BY_NAME(.ctors.*))
+ *(.ctors)
+
+.dtors
+ *crtbegin.o(.dtors)
+ *crtbegin?.o(.dtors)
+ *(EXCLUDE_FILE(*crtend?.o *crtend.o) .dtors)
+ *(SORT_BY_NAME(.dtors.*))
+ *(.dtors)
+
+.jcr
+ *(.jcr)
+
+.data.rel.ro    0x0000000000003dc0       0x18
+ *(.data.rel.ro.local* .gnu.linkonce.d.rel.ro.local.*)
+ *(.data.rel.ro .data.rel.ro.* .gnu.linkonce.d.rel.ro.*)
+ .data.rel.ro   0x0000000000003dc0        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ .data.rel.ro.g_ops
+                0x0000000000003dc0       0x18 lib/libshared.a.p/dispatch_impls.c.o
+                0x0000000000003dc0                g_ops
+
+.dynamic        0x0000000000003dd8      0x1e0
+ *(.dynamic)
+ .dynamic       0x0000000000003dd8      0x1e0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+                0x0000000000003dd8                _DYNAMIC
+
+.got            0x0000000000003fb8       0x28
+ *(.got)
+ .got           0x0000000000003fb8       0x28 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ *(.igot)
+                0x0000000000003fe8                . = DATA_SEGMENT_RELRO_END (., (SIZEOF (.got.plt) >= 0x18)?0x18:0x0)
+
+.got.plt        0x0000000000003fe8       0x20
+ *(.got.plt)
+ .got.plt       0x0000000000003fe8       0x20 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+                0x0000000000003fe8                _GLOBAL_OFFSET_TABLE_
+ *(.igot.plt)
+
+.data           0x0000000000004008        0x8
+ *(.data .data.* .gnu.linkonce.d.*)
+ .data.rel.local
+                0x0000000000004008        0x8 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtbeginS.o
+                0x0000000000004008                __dso_handle
+
+.tm_clone_table
+                0x0000000000004010        0x0
+ .tm_clone_table
+                0x0000000000004010        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtbeginS.o
+ .tm_clone_table
+                0x0000000000004010        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtendS.o
+
+.data1
+ *(.data1)
+                0x0000000000004010                _edata = .
+                [!provide]                        PROVIDE (edata = .)
+                0x0000000000004010                . = ALIGN (ALIGNOF (NEXT_SECTION))
+                0x0000000000004010                __bss_start = .
+
+.bss            0x0000000000004010        0x8
+ *(.dynbss)
+ .dynbss        0x0000000000004010        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+ *(.bss .bss.* .gnu.linkonce.b.*)
+ .bss           0x0000000000004010        0x1 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtbeginS.o
+ *(COMMON)
+                0x0000000000004018                . = ALIGN ((. != 0x0)?0x8:0x1)
+ *fill*         0x0000000000004011        0x7 
+
+.lbss
+ *(.dynlbss)
+ *(.lbss .lbss.* .gnu.linkonce.lb.*)
+ *(LARGE_COMMON)
+                0x0000000000004018                . = ALIGN (0x8)
+                0x0000000000004018                . = SEGMENT_START ("ldata-segment", .)
+
+.lrodata
+ *(.lrodata .lrodata.* .gnu.linkonce.lr.*)
+
+.ldata          0x0000000000006018        0x0
+ *(.ldata .ldata.* .gnu.linkonce.l.*)
+                0x0000000000006018                . = ALIGN ((. != 0x0)?0x8:0x1)
+                0x0000000000006018                . = ALIGN (0x8)
+                0x0000000000004018                _end = .
+                [!provide]                        PROVIDE (end = .)
+                0x0000000000006018                . = DATA_SEGMENT_END (.)
+
+.stab
+ *(.stab)
+
+.stabstr
+ *(.stabstr)
+
+.stab.excl
+ *(.stab.excl)
+
+.stab.exclstr
+ *(.stab.exclstr)
+
+.stab.index
+ *(.stab.index)
+
+.stab.indexstr
+ *(.stab.indexstr)
+
+.comment        0x0000000000000000       0x1b
+ *(.comment)
+ .comment       0x0000000000000000       0x1b /usr/lib/gcc/x86_64-pc-linux-gnu/16/../../../../lib/Scrt1.o
+                                         0x38 (size before relaxing)
+ .comment       0x000000000000001b        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtbeginS.o
+                                         0x1c (size before relaxing)
+ .comment       0x000000000000001b        0x0 app1/app1.p/main.c.o
+                                         0x1c (size before relaxing)
+ .comment       0x000000000000001b        0x0 app1/app1.p/strong_override.c.o
+                                         0x1c (size before relaxing)
+ .comment       0x000000000000001b        0x0 lib/libshared.a.p/shared_utils.c.o
+                                         0x1c (size before relaxing)
+ .comment       0x000000000000001b        0x0 lib/libshared.a.p/dispatch_impls.c.o
+                                         0x1c (size before relaxing)
+ .comment       0x000000000000001b        0x0 lib/libshared.a.p/icf_pair.c.o
+                                         0x1c (size before relaxing)
+ .comment       0x000000000000001b        0x0 /usr/lib/gcc/x86_64-pc-linux-gnu/16/crtendS.o
+                                         0x1c (size before relaxing)
+
+.gnu.build.attributes
+ *(.gnu.build.attributes .gnu.build.attributes.*)
+
+.debug
+ *(.debug)
+
+.line
+ *(.line)
+
+.debug_srcinfo
+ *(.debug_srcinfo)
+
+.debug_sfnames
+ *(.debug_sfnames)
+
+.debug_aranges  0x0000000000000000      0x120
+ *(.debug_aranges)
+ .debug_aranges
+                0x0000000000000000       0x30 app1/app1.p/main.c.o
+ .debug_aranges
+                0x0000000000000030       0x30 app1/app1.p/strong_override.c.o
+ .debug_aranges
+                0x0000000000000060       0x60 lib/libshared.a.p/shared_utils.c.o
+ .debug_aranges
+                0x00000000000000c0       0x20 lib/libshared.a.p/dispatch_impls.c.o
+ .debug_aranges
+                0x00000000000000e0       0x40 lib/libshared.a.p/icf_pair.c.o
+
+.debug_pubnames
+ *(.debug_pubnames)
+
+.debug_info     0x0000000000000000      0x5c8
+ *(.debug_info .gnu.linkonce.wi.*)
+ .debug_info    0x0000000000000000      0x2c8 app1/app1.p/main.c.o
+ .debug_info    0x00000000000002c8       0x61 app1/app1.p/strong_override.c.o
+ .debug_info    0x0000000000000329      0x139 lib/libshared.a.p/shared_utils.c.o
+ .debug_info    0x0000000000000462       0xd6 lib/libshared.a.p/dispatch_impls.c.o
+ .debug_info    0x0000000000000538       0x90 lib/libshared.a.p/icf_pair.c.o
+
+.debug_abbrev   0x0000000000000000      0x3f3
+ *(.debug_abbrev)
+ .debug_abbrev  0x0000000000000000      0x1a1 app1/app1.p/main.c.o
+ .debug_abbrev  0x00000000000001a1       0x4d app1/app1.p/strong_override.c.o
+ .debug_abbrev  0x00000000000001ee       0xb7 lib/libshared.a.p/shared_utils.c.o
+ .debug_abbrev  0x00000000000002a5       0xcc lib/libshared.a.p/dispatch_impls.c.o
+ .debug_abbrev  0x0000000000000371       0x82 lib/libshared.a.p/icf_pair.c.o
+
+.debug_line     0x0000000000000000      0x2b8
+ *(.debug_line .debug_line.* .debug_line_end)
+ .debug_line    0x0000000000000000       0xe4 app1/app1.p/main.c.o
+ .debug_line    0x00000000000000e4       0x57 app1/app1.p/strong_override.c.o
+ .debug_line    0x000000000000013b       0xc9 lib/libshared.a.p/shared_utils.c.o
+ .debug_line    0x0000000000000204       0x48 lib/libshared.a.p/dispatch_impls.c.o
+ .debug_line    0x000000000000024c       0x6c lib/libshared.a.p/icf_pair.c.o
+
+.debug_frame
+ *(.debug_frame)
+
+.debug_str      0x0000000000000000      0x228
+ *(.debug_str)
+ .debug_str     0x0000000000000000      0x228 app1/app1.p/main.c.o
+                                        0x16e (size before relaxing)
+ .debug_str     0x0000000000000228        0x0 app1/app1.p/strong_override.c.o
+                                         0xb8 (size before relaxing)
+ .debug_str     0x0000000000000228        0x0 lib/libshared.a.p/shared_utils.c.o
+                                         0xe0 (size before relaxing)
+ .debug_str     0x0000000000000228        0x0 lib/libshared.a.p/dispatch_impls.c.o
+                                         0xdb (size before relaxing)
+ .debug_str     0x0000000000000228        0x0 lib/libshared.a.p/icf_pair.c.o
+                                         0xd5 (size before relaxing)
+
+.debug_loc
+ *(.debug_loc)
+
+.debug_macinfo
+ *(.debug_macinfo)
+
+.debug_weaknames
+ *(.debug_weaknames)
+
+.debug_funcnames
+ *(.debug_funcnames)
+
+.debug_typenames
+ *(.debug_typenames)
+
+.debug_varnames
+ *(.debug_varnames)
+
+.debug_pubtypes
+ *(.debug_pubtypes)
+
+.debug_ranges
+ *(.debug_ranges)
+
+.debug_addr
+ *(.debug_addr)
+
+.debug_line_str
+                0x0000000000000000       0xec
+ *(.debug_line_str)
+ .debug_line_str
+                0x0000000000000000       0xec app1/app1.p/main.c.o
+                                         0xda (size before relaxing)
+ .debug_line_str
+                0x00000000000000ec        0x0 app1/app1.p/strong_override.c.o
+                                         0xba (size before relaxing)
+ .debug_line_str
+                0x00000000000000ec        0x0 lib/libshared.a.p/shared_utils.c.o
+                                         0xaf (size before relaxing)
+ .debug_line_str
+                0x00000000000000ec        0x0 lib/libshared.a.p/dispatch_impls.c.o
+                                         0xda (size before relaxing)
+ .debug_line_str
+                0x00000000000000ec        0x0 lib/libshared.a.p/icf_pair.c.o
+                                         0xa3 (size before relaxing)
+
+.debug_loclists
+                0x0000000000000000       0xf9
+ *(.debug_loclists)
+ .debug_loclists
+                0x0000000000000000       0xbb app1/app1.p/main.c.o
+ .debug_loclists
+                0x00000000000000bb       0x3e lib/libshared.a.p/shared_utils.c.o
+
+.debug_macro
+ *(.debug_macro)
+
+.debug_names
+ *(.debug_names)
+
+.debug_rnglists
+                0x0000000000000000       0x94
+ *(.debug_rnglists)
+ .debug_rnglists
+                0x0000000000000000       0x27 app1/app1.p/main.c.o
+ .debug_rnglists
+                0x0000000000000027       0x17 app1/app1.p/strong_override.c.o
+ .debug_rnglists
+                0x000000000000003e       0x35 lib/libshared.a.p/shared_utils.c.o
+ .debug_rnglists
+                0x0000000000000073       0x21 lib/libshared.a.p/icf_pair.c.o
+
+.debug_str_offsets
+ *(.debug_str_offsets)
+
+.debug_sup
+ *(.debug_sup)
+
+.gnu.attributes
+ *(.gnu.attributes)
+
+/DISCARD/
+ *(.note.GNU-stack)
+ *(.gnu_debuglink)
+ *(.gnu.lto_*)
+ *(.gnu_object_only)
+OUTPUT(app1/app1 elf64-x86-64)

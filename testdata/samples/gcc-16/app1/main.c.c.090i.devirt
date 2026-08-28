@@ -1,0 +1,119 @@
+No noted function pointers stored in records.
+
+
+
+Procesing function use_dispatch/4
+Call is cold
+
+Call is cold
+
+0 polymorphic calls, 0 devirtualized, 0 speculatively devirtualized, 2 cold
+0 have multiple targets, 0 overwritable, 0 already speculated (0 agree, 0 disagree), 0 external, 0 not defined, 0 artificial, 0 infos dropped
+Symbol table:
+
+g_ops/9 (g_ops)
+  Type: variable
+  Body removed by symtab_remove_unreachable_nodes
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: use_dispatch/4 (read) use_dispatch/4 (read) 
+  Availability: not_available
+  Varpool flags: read-only
+printf/8 (printf)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Availability: not_available
+  Function flags:
+  Called by: main/5 (1073741824 (estimated locally),1.00 per call) 
+  Calls: 
+hook/7 (hook)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Availability: not_available
+  Function flags:
+  Called by: main/5 (1073741824 (estimated locally),1.00 per call) 
+  Calls: 
+compute/6 (compute)
+  Type: function
+  Visibility: semantic_interposition external public
+  References: 
+  Referring: 
+  Availability: not_available
+  Function flags:
+  Called by: main/5 (1073741824 (estimated locally),1.00 per call) 
+  Calls: 
+main/5 (main)
+  Type: function definition analyzed
+  Visibility: externally_visible semantic_interposition public
+  References: 
+  Referring: 
+  Availability: available
+  Function flags: count:1073741824 (estimated locally) body only_called_at_startup executed_once
+  Called by: 
+  Calls: printf/8 (1073741824 (estimated locally),1.00 per call) hook/7 (1073741824 (estimated locally),1.00 per call) use_dispatch/4 (1073741824 (estimated locally),1.00 per call) compute/6 (1073741824 (estimated locally),1.00 per call) 
+use_dispatch/4 (use_dispatch)
+  Type: function definition analyzed
+  Visibility: semantic_interposition prevailing_def_ironly
+  References: g_ops/9 (read) g_ops/9 (read) 
+  Referring: 
+  Availability: local
+  Function flags: count:1073741824 (estimated locally) body local executed_once
+  Called by: main/5 (1073741824 (estimated locally),1.00 per call) 
+  Calls: 
+       indirect simple callsite, not calling a known parameter, flags 0, num speculative call targets: 0
+       indirect simple callsite, not calling a known parameter, flags 0, num speculative call targets: 0
+int main (int argc, char * * argv)
+{
+  int r;
+  int _6;
+  int _9;
+
+  <bb 2> [local count: 1073741824]:
+  # DEBUG BEGIN_STMT
+  # DEBUG BEGIN_STMT
+  r_4 = compute (argc_2(D), 3);
+  # DEBUG r => r_4
+  # DEBUG BEGIN_STMT
+  _6 = use_dispatch (2, 5);
+  r_7 = r_4 + _6;
+  # DEBUG r => r_7
+  # DEBUG BEGIN_STMT
+  _9 = hook (r_7);
+  r_10 = r_7 + _9;
+  # DEBUG r => r_10
+  # DEBUG BEGIN_STMT
+  printf ("app1: %d\n", r_10);
+  # DEBUG BEGIN_STMT
+  return 0;
+
+}
+
+
+int use_dispatch (int a, int b)
+{
+  int p;
+  int s;
+  int (*<T4f1>) (int, int) _1;
+  int (*<T4f1>) (int, int) _2;
+  int _10;
+
+  <bb 2> [local count: 1073741824]:
+  # DEBUG BEGIN_STMT
+  _1 = g_ops.add;
+  s_7 = _1 (a_4(D), b_5(D));
+  # DEBUG s => s_7
+  # DEBUG BEGIN_STMT
+  _2 = g_ops.mul;
+  p_9 = _2 (a_4(D), b_5(D));
+  # DEBUG p => p_9
+  # DEBUG BEGIN_STMT
+  _10 = s_7 + p_9;
+  return _10;
+
+}
+
+
