@@ -337,12 +337,21 @@ func (s *Server) handleListUnreachableSymbols(_ context.Context, req mcp.CallToo
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
+	// symbol_reachability is a view derived from link_resolutions: absence
+	// of a link_resolutions row for (target, symbol) is exactly the old
+	// reachable=0 case. The kind guard preserves the old table's implicit
+	// filter — the ingest write loop skipped static libraries entirely, so
+	// asking about "unreachable symbols in a static library" returned empty.
 	rows, err := s.db.Query(`
-		SELECT s.usr, s.name, s.kind, IFNULL(s.signature, ''), r.section_kept
-		FROM symbol_reachability r
-		JOIN symbols s ON s.id = r.symbol_id
-		WHERE r.target_id = ? AND r.reachable = 0
-		ORDER BY s.name`, targetID)
+		SELECT s.usr, s.name, s.kind, IFNULL(s.signature, ''), 1
+		FROM symbols s
+		WHERE EXISTS (
+		    SELECT 1 FROM targets t
+		    WHERE t.id = ? AND t.kind IN ('executable', 'shared_library'))
+		  AND NOT EXISTS (
+		    SELECT 1 FROM link_resolutions lr
+		    WHERE lr.target_id = ? AND lr.usr = s.usr)
+		ORDER BY s.name`, targetID, targetID)
 	if err != nil {
 		return mcp.NewToolResultError("list_unreachable_symbols: " + err.Error()), nil
 	}

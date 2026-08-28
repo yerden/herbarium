@@ -139,7 +139,6 @@ func runCollect(args []string) int {
 	fmt.Printf("  indirect sites:      %d\n", dwarfSum.IndirectSites)
 	fmt.Printf("  link resolutions:    %d\n", linkSum.LinkResolutions)
 	fmt.Printf("  objdump call edges:  %d\n", linkSum.ObjdumpEdges)
-	fmt.Printf("  reachability rows:   %d\n", linkSum.Reachability)
 	fmt.Printf("  source files packed: %d (%d new blobs, %d deduped, %d generated)\n",
 		srcSum.Files, srcSum.Blobs, srcSum.Duplicates, srcSum.Generated)
 	return 0

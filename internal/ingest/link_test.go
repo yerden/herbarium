@@ -1,6 +1,7 @@
 package ingest_test
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 
@@ -164,8 +165,8 @@ func TestReachability(t *testing.T) {
 	defer db.Close()
 
 	cases := []struct {
-		target       string
-		symbol       string
+		target        string
+		symbol        string
 		wantReachable int
 	}{
 		{"app1", "main", 1},
@@ -180,12 +181,20 @@ func TestReachability(t *testing.T) {
 	}
 	for _, tc := range cases {
 		var got int
-		if err := db.QueryRow(`
+		err := db.QueryRow(`
 			SELECT sr.reachable FROM symbol_reachability sr
 			JOIN targets t ON sr.target_id = t.id
 			JOIN symbols s ON sr.symbol_id = s.id
 			WHERE t.name = ? AND s.name = ?
-		`, tc.target, tc.symbol).Scan(&got); err != nil {
+		`, tc.target, tc.symbol).Scan(&got)
+		// The view emits only reachable=1 rows: an absent row means the
+		// symbol has no link_resolutions entry for this target, i.e. it
+		// was dead-stripped, dynamically resolved, or fully inlined.
+		if err == sql.ErrNoRows {
+			got = 0
+			err = nil
+		}
+		if err != nil {
 			t.Errorf("%s.%s: %v", tc.target, tc.symbol, err)
 			continue
 		}

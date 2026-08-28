@@ -125,13 +125,20 @@ CREATE TABLE link_resolutions (
   losing_objects TEXT,          -- JSON array
   archive        TEXT           -- containing archive if pulled from .a, else ''
 );
-CREATE INDEX idx_lr_usr    ON link_resolutions(usr);
-CREATE INDEX idx_lr_target ON link_resolutions(target_id);
+CREATE INDEX idx_lr_usr        ON link_resolutions(usr);
+CREATE INDEX idx_lr_target     ON link_resolutions(target_id);
+CREATE INDEX idx_lr_target_usr ON link_resolutions(target_id, usr);
 
--- Reachability from entry points (link-time GC)
-CREATE TABLE symbol_reachability (
-  target_id    INTEGER REFERENCES targets(id),
-  symbol_id    INTEGER REFERENCES symbols(id),
-  reachable    INTEGER,         -- 0 = dead-stripped
-  section_kept INTEGER
-);
+-- Reachability from entry points (link-time GC). Derived view: a symbol is
+-- reachable in a target iff link_resolutions records a definition for it in
+-- that target's final binary. section_kept is a placeholder — parsing
+-- 'Discarded input sections' from the map file is future work; until then
+-- every kept symbol has section_kept=1 by definition.
+CREATE VIEW symbol_reachability AS
+SELECT
+  lr.target_id AS target_id,
+  s.id         AS symbol_id,
+  1            AS reachable,
+  1            AS section_kept
+FROM link_resolutions lr
+JOIN symbols s ON s.usr = lr.usr;

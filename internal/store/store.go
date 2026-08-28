@@ -20,7 +20,15 @@ import (
 // (weak/strong overrides, multi-executable `main`, static-inline in
 // headers). No migration path is provided — .hbr files are single-shot
 // build artifacts, so callers just re-collect.
-const SchemaVersion = "2"
+//
+// v2 → v3: symbol_reachability is no longer a physical table. It became
+// a view derived from link_resolutions ∩ symbols (via usr). Consumers
+// that previously filtered WHERE reachable = 0 must switch to a NOT
+// EXISTS check against link_resolutions — the view only emits reachable=1
+// rows. Motivation: the old table stored a full target×symbol cross
+// product (~13M rows, ~75% of the .hbr's disk footprint) that was
+// entirely derivable from link_resolutions.
+const SchemaVersion = "3"
 
 //go:embed schema.sql
 var schemaSQL string

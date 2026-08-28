@@ -17,13 +17,13 @@ import (
 type LinkSummary struct {
 	LinkResolutions int
 	ObjdumpEdges    int
-	Reachability    int
 }
 
 // Link ingests the link-plane facts: nm on each linked binary, its
 // .map file if configured, and objdump for the post-optimization edge
-// view. Populates link_resolutions, call_edges (source='objdump'),
-// and symbol_reachability.
+// view. Populates link_resolutions and call_edges (source='objdump').
+// symbol_reachability is a view over link_resolutions; no separate
+// write is needed.
 //
 // Depends on the Compiler + DWARF + Targets passes — symbols must
 // already exist, and targetIDs must map each Meson target name to its
@@ -55,14 +55,6 @@ func Link(db *sql.DB, bd *builddir.BuildDir, intro *mesonintrospect.Introspectio
 		return LinkSummary{}, fmt.Errorf("ingest/link: prepare objdump edges: %w", err)
 	}
 	defer edgeStmt.Close()
-
-	reachStmt, err := tx.Prepare(`INSERT INTO symbol_reachability
-		(target_id, symbol_id, reachable, section_kept)
-		VALUES (?, ?, ?, 1)`)
-	if err != nil {
-		return LinkSummary{}, fmt.Errorf("ingest/link: prepare reachability: %w", err)
-	}
-	defer reachStmt.Close()
 
 	// Precompute map: target name → linker map path (top-level builddir).
 	mapByTarget := indexMapFiles(bd)
@@ -101,7 +93,6 @@ func Link(db *sql.DB, bd *builddir.BuildDir, intro *mesonintrospect.Introspectio
 
 		// link_resolutions: one row per symbol in this binary that we
 		// know about at the source level.
-		reachable := map[int64]bool{}
 		for _, s := range syms {
 			// Only functions and data we might track. Skip debugging,
 			// runtime, and reserved sections we didn't index.
@@ -112,7 +103,6 @@ func Link(db *sql.DB, bd *builddir.BuildDir, intro *mesonintrospect.Introspectio
 			if !ok {
 				continue
 			}
-			reachable[symID] = true
 
 			winningObj := ""
 			archive := ""
@@ -153,19 +143,6 @@ func Link(db *sql.DB, bd *builddir.BuildDir, intro *mesonintrospect.Introspectio
 				return LinkSummary{}, fmt.Errorf("ingest/link: call_edges: %w", err)
 			}
 			sum.ObjdumpEdges++
-		}
-
-		// symbol_reachability: for every indexed symbol, record whether
-		// the binary contains a definition of it.
-		for symID := range usrByID {
-			reachInt := 0
-			if reachable[symID] {
-				reachInt = 1
-			}
-			if _, err := reachStmt.Exec(targetID, symID, reachInt); err != nil {
-				return LinkSummary{}, fmt.Errorf("ingest/link: reachability: %w", err)
-			}
-			sum.Reachability++
 		}
 	}
 

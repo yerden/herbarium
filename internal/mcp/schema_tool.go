@@ -98,8 +98,8 @@ var SchemaEnums = []SchemaEnum{
 	},
 	{
 		Column: "symbol_reachability.reachable",
-		Values: []string{"0", "1"},
-		Notes:  "Derived from nm on the shipped binary. Symbols fully inlined away and pure externals both read as 0.",
+		Values: []string{"1"},
+		Notes:  "symbol_reachability is a view over link_resolutions; it only emits reachable=1 rows. A symbol that was dead-stripped, dynamically resolved, or fully inlined away is absent from the view for that target — test with NOT EXISTS or a LEFT JOIN, not WHERE reachable = 0.",
 	},
 }
 
@@ -148,7 +148,7 @@ FROM sources s JOIN blobs b ON b.hash = s.blob_hash
 WHERE s.path = :path`,
 	},
 	{
-		Purpose: "Reachability of a symbol per target (0 = dead-stripped or fully inlined away or extern-only)",
+		Purpose: "Reachability of a symbol per target (present row = reachable; absent row = dead-stripped, dynamically resolved, or fully inlined away)",
 		SQL: `SELECT t.name AS target, r.reachable, r.section_kept
 FROM symbol_reachability r
 JOIN symbols s ON s.id = r.symbol_id
