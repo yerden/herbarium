@@ -23,9 +23,9 @@ func (s *Server) registerSymbolTools() {
 				"Scopeable by symbol kind or by target membership.",
 		),
 		mcp.WithString("query", mcp.Required(),
-			mcp.Description("Substring or partial identifier. Empty tokens are ignored.")),
+			mcp.Description("Substring or partial identifier. Split on non-alphanumeric boundaries (so 'add_ints' tokenizes to 'add ints') and each token gets a trailing '*' for prefix matching — 'add' matches 'add_ints', 'adder', 'quick_add'. All-punctuation input matches nothing.")),
 		mcp.WithString("kind",
-			mcp.Description("Filter by symbols.kind ('function' | 'variable' | 'typedef' | ...).")),
+			mcp.Description("Filter by symbols.kind. Common values: 'function', 'variable', 'typedef' — call describe_schema for the full enum.")),
 		mcp.WithString("target",
 			mcp.Description("Restrict to symbols linked into this target.")),
 	), s.handleFindSymbol)
@@ -34,10 +34,13 @@ func (s *Server) registerSymbolTools() {
 		mcp.WithDescription(
 			"Canonical profile of one symbol by USR: name, kind, linkage, signature, "+
 				"address-taken flag, every observed definition, every link-time name, "+
-				"and per-target link-resolution outcome.",
+				"and per-target link-resolution outcome. This is the one-shot check "+
+				"for 'is this symbol dead in target T?' — the per-target "+
+				"link_resolutions list is exactly what list_unreachable_symbols "+
+				"draws on, so a symbol with a resolution here is not dead there.",
 		),
 		mcp.WithString("usr", mcp.Required(),
-			mcp.Description("The stable USR ('c:@F@name' or 'c:<path>@F@name') as returned by find_symbol.")),
+			mcp.Description("The stable USR ('c:@F@name' or 'c:<path>@F@name') as returned by find_symbol.hits[].usr.")),
 	), s.handleDescribeSymbol)
 }
 

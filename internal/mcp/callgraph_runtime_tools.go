@@ -13,31 +13,39 @@ import (
 func (s *Server) registerCallGraphRuntimeTools() {
 	s.mcp.AddTool(newTool("list_linked_callers",
 		mcp.WithDescription(
-			"Callers per objdump of the shipped binary (post-inlining, "+
-				"post-optimization). Different answer than list_callers when "+
-				"inlining is aggressive; this is ground truth for 'what actually "+
+			"Callers per objdump of the shipped binary (runtime view; post-inlining, "+
+				"post-optimization, per-target). Different answer than list_callers "+
+				"when inlining is aggressive; this is ground truth for 'what actually "+
 				"calls X at runtime'.",
 		),
-		mcp.WithString("callee_usr", mcp.Required()),
+		mcp.WithString("callee_usr", mcp.Required(),
+			mcp.Description("USR of the callee (from find_symbol.hits[].usr or describe_symbol.usr).")),
 		mcp.WithString("target", mcp.Required(),
-			mcp.Description("Target binary name — objdump edges are per-target.")),
+			mcp.Description("Target binary name — runtime callgraph is per-target.")),
 	), s.handleListLinkedCallers)
 
 	s.mcp.AddTool(newTool("list_linked_callees",
 		mcp.WithDescription(
-			"Outgoing calls from this symbol per objdump of the shipped binary "+
-				"(post-inlining, per-target).",
+			"Callees per objdump of the shipped binary (runtime view; post-inlining, "+
+				"post-optimization, per-target). Different answer than list_callees "+
+				"when inlining is aggressive; pair with describe_inline_decisions to "+
+				"see which callees were folded in.",
 		),
-		mcp.WithString("caller_usr", mcp.Required()),
-		mcp.WithString("target", mcp.Required()),
+		mcp.WithString("caller_usr", mcp.Required(),
+			mcp.Description("USR of the caller (from find_symbol.hits[].usr or describe_symbol.usr).")),
+		mcp.WithString("target", mcp.Required(),
+			mcp.Description("Target binary name — runtime callgraph is per-target.")),
 	), s.handleListLinkedCallees)
 
 	s.mcp.AddTool(newTool("describe_inline_decisions",
 		mcp.WithDescription(
 			"Which callees GCC inlined into a given caller and which stayed as "+
-				"actual calls. Reconciles source-view vs runtime-view for that caller.",
+				"actual calls. Reconciles source view (list_callees) vs runtime view "+
+				"(list_linked_callees) for that caller — a callee that appears in the "+
+				"first but not the second was inlined here.",
 		),
-		mcp.WithString("caller_usr", mcp.Required()),
+		mcp.WithString("caller_usr", mcp.Required(),
+			mcp.Description("USR of the caller (from find_symbol.hits[].usr or describe_symbol.usr).")),
 	), s.handleDescribeInlineDecisions)
 }
 

@@ -55,9 +55,11 @@ func (s *Server) registerSourceTools() {
 		mcp.WithString("path_prefix",
 			mcp.Description("Restrict to files whose path starts with this prefix. Applied to both project and external paths.")),
 		mcp.WithString("kind",
-			mcp.Description("'source' (.c/.C/.cpp/etc.), 'header' (.h/.hpp/.hxx), or 'generated' (is_generated=1).")),
+			mcp.Description("'source' (.c/.C/.cpp/etc.), 'header' (.h/.hpp/.hxx), or 'generated' (is_generated=1)."),
+			mcp.Enum("source", "header", "generated")),
 		mcp.WithBoolean("include_external",
-			mcp.Description("If true, union external_sources rows into the result. Default false.")),
+			mcp.Description("If true, union external_sources rows into the result."),
+			mcp.DefaultBool(false)),
 	), s.handleListSourceFiles)
 
 	s.mcp.AddTool(newTool("verify_source",
@@ -67,7 +69,7 @@ func (s *Server) registerSourceTools() {
 				"launched with --project-root, live-hashes the on-disk file and reports the comparison.",
 		),
 		mcp.WithString("path", mcp.Required(),
-			mcp.Description("Project-relative path.")),
+			mcp.Description("Project-relative path (forward slashes). External headers are not currently supported.")),
 		mcp.WithString("expected_hash",
 			mcp.Description("Optional SHA-256 hex to compare against; omit to compare against the live file (requires --project-root).")),
 	), s.handleVerifySource)

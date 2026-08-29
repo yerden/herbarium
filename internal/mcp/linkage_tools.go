@@ -22,9 +22,9 @@ func (s *Server) registerLinkageTools() {
 				"actually runs in a binary.",
 		),
 		mcp.WithString("usr", mcp.Required(),
-			mcp.Description("USR of the symbol to resolve.")),
+			mcp.Description("USR of the symbol (from find_symbol.hits[].usr or describe_symbol.usr).")),
 		mcp.WithString("target", mcp.Required(),
-			mcp.Description("Target binary name.")),
+			mcp.Description("Target binary name — link resolution is per-target.")),
 	), s.handleDescribeLinkResolution)
 
 	s.mcp.AddTool(newTool("list_weak_symbols",
@@ -42,14 +42,18 @@ func (s *Server) registerLinkageTools() {
 				"definition for anywhere in the index (typical example: libc's printf). "+
 				"Derived from objdump call edges minus symbol_definitions.",
 		),
-		mcp.WithString("target", mcp.Required()),
+		mcp.WithString("target", mcp.Required(),
+			mcp.Description("Target binary name — undefined externals are per-target.")),
 	), s.handleListUndefinedSymbols)
 
 	s.mcp.AddTool(newTool("list_icf_groups",
 		mcp.WithDescription(
 			"Functions merged by identical-code folding (from GCC's -fdump-ipa-icf). "+
 				"NOTE: the current ingest pipeline parses the ICF dump but does not "+
-				"persist folded groups; returns an empty list until that fires.",
+				"persist folded groups; returns an empty list until that fires. A "+
+				"symbol folded away has no link_resolutions row of its own, so it will "+
+				"show up in list_unreachable_symbols as a false positive until this "+
+				"gap is filled.",
 		),
 		mcp.WithString("target",
 			mcp.Description("Restrict to groups reachable in this target.")),
@@ -57,10 +61,20 @@ func (s *Server) registerLinkageTools() {
 
 	s.mcp.AddTool(newTool("list_unreachable_symbols",
 		mcp.WithDescription(
-			"Symbols the linker would garbage-collect (or did, under "+
-				"--gc-sections) in this target. Dead-code review signal.",
+			"Symbols with a definition but no link_resolutions row for this target — "+
+				"a first-pass dead-code signal. Unfiltered, so expect false positives: "+
+				"(1) internal-linkage symbols (static functions, header-defined "+
+				"statics) are never surfaced in link_resolutions by design and always "+
+				"appear here; (2) symbols folded away by ICF appear here until "+
+				"list_icf_groups persistence lands; (3) symbols reachable only from "+
+				"__attribute__((constructor)) / .init_array chains appear here because "+
+				"list_entry_points does not classify those; (4) symbols inlined at "+
+				"every call site appear here — use describe_inline_decisions on their "+
+				"callers to distinguish. Verify any surprising hit with describe_symbol "+
+				"(per-target link_resolutions in one call) before calling it dead.",
 		),
-		mcp.WithString("target", mcp.Required()),
+		mcp.WithString("target", mcp.Required(),
+			mcp.Description("Target binary name — reachability is per-target.")),
 	), s.handleListUnreachableSymbols)
 
 	s.mcp.AddTool(newTool("list_entry_points",
@@ -68,9 +82,12 @@ func (s *Server) registerLinkageTools() {
 			"Root set for reachability queries in this target: 'main' + externally-"+
 				"visible symbols that the linker resolved into this target. Initializer "+
 				"arrays / constructor-attributed functions are not currently classified "+
-				"(would require an additional DWARF pass).",
+				"(would require an additional DWARF pass) — if a symbol looks "+
+				"unreachable but is reached from a constructor, describe_symbol on it "+
+				"and inspect whether its callers carry __attribute__((constructor)).",
 		),
-		mcp.WithString("target", mcp.Required()),
+		mcp.WithString("target", mcp.Required(),
+			mcp.Description("Target binary name — entry points are per-target.")),
 	), s.handleListEntryPoints)
 }
 

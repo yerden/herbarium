@@ -27,32 +27,39 @@ func (s *Server) registerCallGraphSourceTools() {
 	s.mcp.AddTool(newTool("list_callers",
 		mcp.WithDescription(
 			"Who calls this symbol per GCC's cgraph (source view; pre-inlining, "+
-				"target-agnostic). Use list_linked_callers for the post-optimization "+
-				"per-binary reality.",
+				"target-agnostic). Use list_linked_callers for the post-inlining "+
+				"per-binary runtime view.",
 		),
 		mcp.WithString("callee_usr", mcp.Required(),
-			mcp.Description("USR of the callee (from find_symbol / describe_symbol).")),
+			mcp.Description("USR of the callee (from find_symbol.hits[].usr or describe_symbol.usr).")),
 		mcp.WithString("target",
 			mcp.Description("Restrict to callers reachable in this target.")),
 	), s.handleListCallers)
 
 	s.mcp.AddTool(newTool("list_callees",
 		mcp.WithDescription(
-			"Direct callees from this symbol per GCC's cgraph (source view).",
+			"Direct callees from this symbol per GCC's cgraph (source view; "+
+				"pre-inlining, target-agnostic). Use list_linked_callees for the "+
+				"post-inlining per-binary runtime view.",
 		),
 		mcp.WithString("caller_usr", mcp.Required(),
-			mcp.Description("USR of the caller.")),
+			mcp.Description("USR of the caller (from find_symbol.hits[].usr or describe_symbol.usr).")),
 		mcp.WithString("target",
 			mcp.Description("Restrict to callees reachable in this target.")),
 	), s.handleListCallees)
 
 	s.mcp.AddTool(newTool("list_call_paths",
 		mcp.WithDescription(
-			"Enumerate direct-call paths between two symbols via GCC's cgraph. "+
-				"Bounded by max_depth (default 6, max 16). Returns up to 50 paths.",
+			"Enumerate direct-call paths between two symbols via GCC's cgraph "+
+				"(source view). Follows direct call edges only — chains that pass "+
+				"through function pointers won't appear; use list_indirect_call_sites "+
+				"+ resolve_indirect_call to trace those. Bounded by max_depth "+
+				"(default 6, max 16). Returns up to 50 paths.",
 		),
-		mcp.WithString("from_usr", mcp.Required()),
-		mcp.WithString("to_usr", mcp.Required()),
+		mcp.WithString("from_usr", mcp.Required(),
+			mcp.Description("USR of the path start (from find_symbol.hits[].usr or describe_symbol.usr).")),
+		mcp.WithString("to_usr", mcp.Required(),
+			mcp.Description("USR of the path end.")),
 		mcp.WithNumber("max_depth",
 			mcp.Description("Maximum path length (edges). Default 6, max 16."),
 			mcp.Min(1),

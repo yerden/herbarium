@@ -23,12 +23,15 @@ func (s *Server) registerIndirectTools() {
 		mcp.WithDescription(
 			"Sites GCC recorded as indirect calls, with source location, callee "+
 				"function-pointer type (when DWARF resolves it), and struct-field hint "+
-				"(when DWARF resolves that). Filterable by caller USR, callee_type, or target.",
+				"(when DWARF resolves that). Filterable by caller USR, callee_type, or "+
+				"target. Feed a site_id into resolve_indirect_call to get a candidate "+
+				"callee list combining devirt hints and type-compatible address-taken "+
+				"functions.",
 		),
 		mcp.WithString("caller_usr",
-			mcp.Description("USR of the enclosing function; omit for all sites.")),
+			mcp.Description("USR of the enclosing function (from find_symbol.hits[].usr or describe_symbol.usr). Omit for all sites.")),
 		mcp.WithString("callee_type",
-			mcp.Description("Filter by canonical fn-pointer type (as DWARF renders it).")),
+			mcp.Description("Filter by canonical fn-pointer type. Copy an existing value from list_indirect_call_sites output's callee_type column — the field is populated by DWARF and often empty on the current pipeline.")),
 		mcp.WithString("target",
 			mcp.Description("Restrict to sites whose caller is reachable in this target.")),
 	), s.handleListIndirectCallSites)
