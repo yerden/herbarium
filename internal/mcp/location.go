@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -96,17 +97,47 @@ func (s *Server) readBlob(hash string) ([]byte, error) {
 	return raw, nil
 }
 
-// readSourceByPath returns the raw source content for a project-
-// relative path, or an error if the blob or the mapping is missing.
+// readSourceByPath returns the raw source content for a path, or an
+// error if the blob or the mapping is missing. Dispatch rules:
+//   - Absolute paths (leading '/') resolve against external_sources.
+//   - Project-relative paths resolve against sources first; on miss,
+//     fall through to generated_sources keyed on the same relative path.
+//     Fall-through matters when a builddir sits outside --project-root
+//     so its build-tree files (config.h etc.) live in generated_sources
+//     instead of sources.
 func (s *Server) readSourceByPath(path string) ([]byte, string, error) {
-	var hash string
-	if err := s.db.QueryRow(
-		`SELECT blob_hash FROM sources WHERE path = ?`, path,
-	).Scan(&hash); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, "", fmt.Errorf("no indexed source at path %q", path)
+	if strings.HasPrefix(path, "/") {
+		return s.readByColumn("external_sources", "abs_path", path)
+	}
+	content, hash, err := s.readByColumn("sources", "path", path)
+	if err == nil {
+		return content, hash, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, "", err
+	}
+	// Fall through: might live in generated_sources under the same key.
+	content, hash, err2 := s.readByColumn("generated_sources", "builddir_rel", path)
+	if err2 != nil {
+		if errors.Is(err2, sql.ErrNoRows) {
+			return nil, "", fmt.Errorf("no indexed source at path %q (looked in sources and generated_sources)", path)
 		}
-		return nil, "", fmt.Errorf("lookup source %q: %w", path, err)
+		return nil, "", err2
+	}
+	return content, hash, nil
+}
+
+// readByColumn is a small helper that fetches a blob_hash from any of the
+// three source tables and decompresses it. Returns sql.ErrNoRows verbatim
+// so callers can implement fall-through.
+func (s *Server) readByColumn(table, keyCol, key string) ([]byte, string, error) {
+	var hash string
+	q := fmt.Sprintf(`SELECT blob_hash FROM %s WHERE %s = ?`, table, keyCol)
+	if err := s.db.QueryRow(q, key).Scan(&hash); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, "", err
+		}
+		return nil, "", fmt.Errorf("lookup %s %q: %w", table, key, err)
 	}
 	content, err := s.readBlob(hash)
 	if err != nil {

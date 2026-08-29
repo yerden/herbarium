@@ -162,4 +162,22 @@ FROM link_resolutions lr
 JOIN targets t ON t.id = lr.target_id
 WHERE lr.usr = :usr AND t.name = :target`,
 	},
+	{
+		Purpose: "Read the declaration site of a symbol from an external header " +
+			"(only useful when collect was invoked with --include-external and the " +
+			"DWARF decl_file falls under the packed globs; empty result otherwise)",
+		SQL: `SELECT es.abs_path, es.blob_hash, sd.decl_line
+FROM symbol_definitions sd
+JOIN symbols s ON s.id = sd.symbol_id
+JOIN external_sources es ON es.abs_path = sd.decl_file
+WHERE s.usr = :usr`,
+	},
+	{
+		Purpose: "Read a build-tree file (configure_file / custom_target output) via generated_sources. " +
+			"Key is builddir-relative — the same value list_source_files returns for IsGenerated=true rows " +
+			"whose Path does not start with '/'.",
+		SQL: `SELECT gs.builddir_rel, gs.blob_hash, b.size
+FROM generated_sources gs JOIN blobs b ON b.hash = gs.blob_hash
+WHERE gs.builddir_rel = :builddir_rel`,
+	},
 }

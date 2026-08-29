@@ -25,6 +25,7 @@ func TestInitAndReopen(t *testing.T) {
 		"symbols", "symbols_fts", "symbol_definitions",
 		"call_edges", "indirect_call_sites", "devirt_hints",
 		"inline_decisions", "link_resolutions", "symbol_reachability",
+		"external_sources", "generated_sources",
 	}
 	for _, name := range wantTables {
 		var n int

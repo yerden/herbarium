@@ -24,12 +24,15 @@ import (
 func (s *Server) registerSourceTools() {
 	s.mcp.AddTool(newTool("read_source",
 		mcp.WithDescription(
-			"Return the source content at a project-relative path from the embedded blob store, "+
-				"optionally sliced by 1-based inclusive line range. Every path any other tool "+
-				"returns is guaranteed to resolve here.",
+			"Return the source content at the given path from the embedded blob store, "+
+				"optionally sliced by 1-based inclusive line range. A project-relative "+
+				"path resolves against `sources`; an absolute path (starting with '/') "+
+				"resolves against `external_sources` (populated only when collect was "+
+				"invoked with --include-external). Every path any other tool returns is "+
+				"guaranteed to resolve here.",
 		),
 		mcp.WithString("path", mcp.Required(),
-			mcp.Description("Project-relative path (forward slashes) as returned by other tools.")),
+			mcp.Description("Project-relative path (forward slashes) OR absolute path for an external header.")),
 		mcp.WithNumber("start_line",
 			mcp.Description("1-based first line to include; omit or 0 for start of file."),
 			mcp.Min(0)),
@@ -41,14 +44,20 @@ func (s *Server) registerSourceTools() {
 	s.mcp.AddTool(newTool("list_source_files",
 		mcp.WithDescription(
 			"Enumerate every file the .hbr has content for. Filter by target membership, "+
-				"path prefix, or file kind ('source' | 'header' | 'generated').",
+				"path prefix, or file kind ('source' | 'header' | 'generated'). "+
+				"Build-tree files from generated_sources (out-of-tree build outputs like "+
+				"config.h) are included by default with IsGenerated=true and no target "+
+				"membership. External headers packed via --include-external are excluded "+
+				"by default; set include_external=true to union them in.",
 		),
 		mcp.WithString("target",
-			mcp.Description("Restrict to files listed as sources of this target (target_sources join).")),
+			mcp.Description("Restrict to files listed as sources of this target (target_sources join). Excludes external headers.")),
 		mcp.WithString("path_prefix",
-			mcp.Description("Restrict to files whose project-relative path starts with this prefix.")),
+			mcp.Description("Restrict to files whose path starts with this prefix. Applied to both project and external paths.")),
 		mcp.WithString("kind",
 			mcp.Description("'source' (.c/.C/.cpp/etc.), 'header' (.h/.hpp/.hxx), or 'generated' (is_generated=1).")),
+		mcp.WithBoolean("include_external",
+			mcp.Description("If true, union external_sources rows into the result. Default false.")),
 	), s.handleListSourceFiles)
 
 	s.mcp.AddTool(newTool("verify_source",
@@ -136,6 +145,7 @@ func (s *Server) handleListSourceFiles(_ context.Context, req mcp.CallToolReques
 	target := req.GetString("target", "")
 	prefix := req.GetString("path_prefix", "")
 	kind := strings.ToLower(req.GetString("kind", ""))
+	includeExternal := req.GetBool("include_external", false)
 
 	// Base query returns every indexed source with its blob size and
 	// generated flag; target/prefix/kind are filtered in Go so we can
@@ -189,6 +199,67 @@ func (s *Server) handleListSourceFiles(_ context.Context, req mcp.CallToolReques
 	}
 	if err := rows.Err(); err != nil {
 		return mcp.NewToolResultError("iterate: " + err.Error()), nil
+	}
+
+	// Generated build-tree files: always included when no target filter is
+	// set (they have no target membership). Path is builddir-relative;
+	// IsGenerated is implicit and set to true for every row.
+	if wantedFiles == nil {
+		genRows, err := s.db.Query(`
+			SELECT gs.builddir_rel, gs.blob_hash, IFNULL(b.size, 0)
+			FROM generated_sources gs
+			LEFT JOIN blobs b ON b.hash = gs.blob_hash
+			ORDER BY gs.builddir_rel`)
+		if err != nil {
+			return mcp.NewToolResultError("generated_sources query: " + err.Error()), nil
+		}
+		defer genRows.Close()
+		for genRows.Next() {
+			f := SourceFile{IsGenerated: true}
+			if err := genRows.Scan(&f.Path, &f.BlobHash, &f.Size); err != nil {
+				return mcp.NewToolResultError("scan generated: " + err.Error()), nil
+			}
+			if prefix != "" && !strings.HasPrefix(f.Path, prefix) {
+				continue
+			}
+			if !matchesKind(kind, f.Path, true) {
+				continue
+			}
+			files = append(files, f)
+		}
+		if err := genRows.Err(); err != nil {
+			return mcp.NewToolResultError("iterate generated: " + err.Error()), nil
+		}
+	}
+
+	// External headers: only when explicitly requested. Target filter
+	// short-circuits the union because externals have no target membership.
+	if includeExternal && wantedFiles == nil {
+		exRows, err := s.db.Query(`
+			SELECT es.abs_path, es.blob_hash, IFNULL(b.size, 0)
+			FROM external_sources es
+			LEFT JOIN blobs b ON b.hash = es.blob_hash
+			ORDER BY es.abs_path`)
+		if err != nil {
+			return mcp.NewToolResultError("external_sources query: " + err.Error()), nil
+		}
+		defer exRows.Close()
+		for exRows.Next() {
+			var f SourceFile
+			if err := exRows.Scan(&f.Path, &f.BlobHash, &f.Size); err != nil {
+				return mcp.NewToolResultError("scan external: " + err.Error()), nil
+			}
+			if prefix != "" && !strings.HasPrefix(f.Path, prefix) {
+				continue
+			}
+			if !matchesKind(kind, f.Path, false) {
+				continue
+			}
+			files = append(files, f)
+		}
+		if err := exRows.Err(); err != nil {
+			return mcp.NewToolResultError("iterate external: " + err.Error()), nil
+		}
 	}
 	return jsonResult(ListSourceFilesResponse{Files: files, Total: len(files)})
 }

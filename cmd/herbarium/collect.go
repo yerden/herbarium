@@ -18,14 +18,29 @@ import (
 func runCollect(args []string) int {
 	fs := flag.NewFlagSet("collect", flag.ContinueOnError)
 	var (
-		bdir     = fs.String("builddir", "", "Meson build directory (required)")
-		proot    = fs.String("project-root", "", "project source root (required)")
-		out      = fs.String("out", "herbarium.hbr", "output .hbr file")
-		strict   = fs.Bool("strict", false, "refuse to pack sources whose mtime is newer than their .o (per herbarium-plan.md Risks)")
-		targets  = fs.String("target", "", "comma-separated list of Meson target names to include; empty means all. Skips nm/objdump/map work for other targets — compiler-plane ingest (symbols, cgraph edges) still covers every TU.")
+		bdir    = fs.String("builddir", "", "Meson build directory (required)")
+		proot   = fs.String("project-root", "", "project source root (required)")
+		out     = fs.String("out", "herbarium.hbr", "output .hbr file")
+		strict  = fs.Bool("strict", false, "refuse to pack sources whose mtime is newer than their .o (per herbarium-plan.md Risks)")
+		targets = fs.String("target", "", "comma-separated list of Meson target names to include; empty means all. Skips nm/objdump/map work for other targets — compiler-plane ingest (symbols, cgraph edges) still covers every TU.")
 	)
+	var externalGlobs stringSliceFlag
+	fs.Var(&externalGlobs, "include-external",
+		"Absolute-path glob pointing at headers outside --project-root to pack into external_sources. "+
+			"Repeatable. Supports a trailing /** for recursive matches (e.g. /usr/include/**). "+
+			"Zero-match globs are a hard error.")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+
+	parsedGlobs := make([]ingest.ExternalGlob, 0, len(externalGlobs))
+	for _, raw := range externalGlobs {
+		g, err := ingest.NewExternalGlob(raw)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "collect:", err)
+			return 2
+		}
+		parsedGlobs = append(parsedGlobs, g)
 	}
 	if *bdir == "" || *proot == "" {
 		fmt.Fprintln(os.Stderr, "collect: --builddir and --project-root are required")
@@ -118,7 +133,10 @@ func runCollect(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	srcSum, err := ingest.Sources(db, bd, intro, pr, ingest.SourcesOptions{Strict: *strict})
+	srcSum, err := ingest.Sources(db, bd, intro, pr, ingest.SourcesOptions{
+		Strict:        *strict,
+		ExternalGlobs: parsedGlobs,
+	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -141,8 +159,22 @@ func runCollect(args []string) int {
 	fmt.Printf("  objdump call edges:  %d\n", linkSum.ObjdumpEdges)
 	fmt.Printf("  source files packed: %d (%d new blobs, %d deduped, %d generated)\n",
 		srcSum.Files, srcSum.Blobs, srcSum.Duplicates, srcSum.Generated)
+	if srcSum.GeneratedFiles > 0 {
+		fmt.Printf("  generated files:     %d (%d new blobs)\n", srcSum.GeneratedFiles, srcSum.GeneratedBlobs)
+	}
+	if srcSum.ExternalFiles > 0 {
+		fmt.Printf("  external headers:    %d (%d new blobs)\n", srcSum.ExternalFiles, srcSum.ExternalBlobs)
+	}
 	return 0
 }
+
+// stringSliceFlag lets flag.Var collect multiple --include-external
+// occurrences into an ordered list. Preserves duplicates so the user's
+// spelling shows up verbatim in error messages.
+type stringSliceFlag []string
+
+func (s *stringSliceFlag) String() string     { return strings.Join(*s, ",") }
+func (s *stringSliceFlag) Set(v string) error { *s = append(*s, v); return nil }
 
 // filterTargets restricts intro.Targets in place to the comma-separated
 // set in spec. Empty spec keeps every target. Unknown names are a hard

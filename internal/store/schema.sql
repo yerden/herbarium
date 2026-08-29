@@ -37,6 +37,27 @@ CREATE TABLE sources (
   is_generated INTEGER
 );
 
+-- External headers (system, vendored, third-party) that the .ninja_deps log
+-- referenced from outside --project-root. Only populated when collect was
+-- invoked with one or more --include-external globs; empty otherwise.
+-- abs_path is the verbatim absolute path from .ninja_deps — no rewriting.
+-- Shares the blobs table with sources so byte-identical content dedups.
+CREATE TABLE external_sources (
+  abs_path  TEXT PRIMARY KEY,
+  blob_hash TEXT REFERENCES blobs(hash)
+);
+
+-- Build-tree files: anything under the builddir that isn't a source in
+-- --project-root. Typically configure_file() output (config.h and friends)
+-- and custom_target outputs. Keyed by builddir-relative path so the value
+-- is stable across machines even when the absolute builddir differs.
+-- Populated automatically whenever ingest sees a t.Generated entry or a
+-- .ninja_deps header rooted under builddir — no flag required.
+CREATE TABLE generated_sources (
+  builddir_rel TEXT PRIMARY KEY,
+  blob_hash    TEXT REFERENCES blobs(hash)
+);
+
 -- Symbols: identity only. One row per USR. Def locations live in
 -- symbol_definitions — a symbol may have multiple defs across TUs
 -- (weak/strong overrides, multi-executable `main`, static-inline in

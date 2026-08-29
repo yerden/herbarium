@@ -28,7 +28,21 @@ import (
 // rows. Motivation: the old table stored a full target×symbol cross
 // product (~13M rows, ~75% of the .hbr's disk footprint) that was
 // entirely derivable from link_resolutions.
-const SchemaVersion = "3"
+//
+// v3 → v4: added external_sources(abs_path, blob_hash) for headers packed
+// via `collect --include-external <glob>`. Empty when the flag wasn't
+// passed, so the on-disk footprint is unchanged for existing use cases.
+// New join surface: symbol_definitions.decl_file → external_sources.abs_path
+// (documented in describe_schema).
+//
+// v4 → v5: added generated_sources(builddir_rel, blob_hash) for files
+// under the builddir that fall outside --project-root (typical when a
+// project is configured out-of-tree). Before v5, t.Generated entries
+// aborted ingest with "outside project-root" and .ninja_deps entries
+// under builddir were silently skipped — so configure_file() output
+// like config.h never made it into the .hbr. Key is builddir-relative
+// so the value is portable.
+const SchemaVersion = "5"
 
 //go:embed schema.sql
 var schemaSQL string

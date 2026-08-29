@@ -260,3 +260,216 @@ func equalSorted(a, b []string) bool {
 	}
 	return true
 }
+
+// TestSourcesGeneratedOutOfTree covers the failure the user reported:
+// with builddir OUTSIDE --project-root, t.Generated entries (typical for
+// configure_file() output) must land in generated_sources instead of
+// aborting ingest or being silently skipped. Uses a hand-built minimal
+// project so we can control the layout directly — the shipped fixture
+// puts builddir inside project-root, which never exercises this branch.
+func TestSourcesGeneratedOutOfTree(t *testing.T) {
+	root := t.TempDir()
+	proj := filepath.Join(root, "project")
+	bdir := filepath.Join(root, "build")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(bdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// One project source and one generated header living under builddir.
+	if err := os.WriteFile(filepath.Join(proj, "main.c"), []byte("int main(void){return 0;}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	confAbs := filepath.Join(bdir, "config.h")
+	confBody := []byte("#define GENERATED 1\n")
+	if err := os.WriteFile(confAbs, confBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	intro := &mesonintrospect.Introspection{
+		Targets: []mesonintrospect.Target{{
+			Name:      "app",
+			Kind:      "executable",
+			Sources:   []string{filepath.Join(proj, "main.c")},
+			Generated: []string{confAbs},
+		}},
+	}
+	bd := &builddir.BuildDir{Root: bdir}
+
+	db := freshDB(t)
+	pr, err := ingest.NewPathResolver(bdir, proj)
+	if err != nil {
+		t.Fatalf("NewPathResolver: %v", err)
+	}
+	sum, err := ingest.Sources(db, bd, intro, pr, ingest.SourcesOptions{})
+	if err != nil {
+		t.Fatalf("Sources: %v", err)
+	}
+
+	// main.c goes into sources (project-relative key).
+	if got := listSources(t, db); !equalSorted(got, []string{"main.c"}) {
+		t.Errorf("sources = %v, want [main.c]", got)
+	}
+	// config.h goes into generated_sources with builddir-relative key.
+	if sum.GeneratedFiles != 1 {
+		t.Errorf("sum.GeneratedFiles = %d, want 1", sum.GeneratedFiles)
+	}
+	var genKey string
+	var genBody []byte
+	if err := db.QueryRow(`
+		SELECT gs.builddir_rel, b.content
+		FROM generated_sources gs JOIN blobs b ON b.hash = gs.blob_hash
+	`).Scan(&genKey, &genBody); err != nil {
+		t.Fatalf("query generated: %v", err)
+	}
+	if genKey != "config.h" {
+		t.Errorf("generated key = %q, want config.h", genKey)
+	}
+	dec, err := zstd.NewReader(bytes.NewReader(genBody))
+	if err != nil {
+		t.Fatalf("zstd: %v", err)
+	}
+	defer dec.Close()
+	got, err := io.ReadAll(dec)
+	if err != nil {
+		t.Fatalf("zstd read: %v", err)
+	}
+	if !bytes.Equal(got, confBody) {
+		t.Errorf("generated content mismatch:\n  got:  %q\n  want: %q", got, confBody)
+	}
+}
+
+// TestSourcesGeneratedOutsideBoth: a t.Generated entry that lives outside
+// both --project-root AND builddir is a genuinely broken introspection —
+// hard-error rather than silently dropping it.
+func TestSourcesGeneratedOutsideBoth(t *testing.T) {
+	root := t.TempDir()
+	proj := filepath.Join(root, "project")
+	bdir := filepath.Join(root, "build")
+	stray := filepath.Join(root, "stray", "orphan.h")
+	for _, d := range []string{proj, bdir, filepath.Dir(stray)} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(proj, "main.c"), []byte("int main(void){return 0;}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stray, []byte("// orphan\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	intro := &mesonintrospect.Introspection{
+		Targets: []mesonintrospect.Target{{
+			Name:      "app",
+			Kind:      "executable",
+			Sources:   []string{filepath.Join(proj, "main.c")},
+			Generated: []string{stray},
+		}},
+	}
+	bd := &builddir.BuildDir{Root: bdir}
+	db := freshDB(t)
+	pr, err := ingest.NewPathResolver(bdir, proj)
+	if err != nil {
+		t.Fatalf("NewPathResolver: %v", err)
+	}
+	_, err = ingest.Sources(db, bd, intro, pr, ingest.SourcesOptions{})
+	if err == nil {
+		t.Fatalf("expected error for generated file outside both roots; got nil")
+	}
+	if !strings.Contains(err.Error(), "outside both") {
+		t.Errorf("expected 'outside both' error; got: %v", err)
+	}
+}
+
+// TestSourcesExternalGlob verifies that --include-external '/usr/include/**'
+// packs system headers transitively pulled in by the fixture (via <stdio.h>)
+// into external_sources rather than skipping them. Requires /usr/include/stdio.h
+// on the host — a linux distro invariant that CI already relies on.
+func TestSourcesExternalGlob(t *testing.T) {
+	if _, err := os.Stat("/usr/include/stdio.h"); err != nil {
+		t.Skip("host lacks /usr/include/stdio.h; skipping external-glob test")
+	}
+	repo := repoRoot(t)
+	bdir := filepath.Join(repo, "testdata", "fixture", "builddir")
+	proot := filepath.Join(repo, "testdata", "fixture")
+
+	db := freshDB(t)
+	pr := mustResolver(t, bdir, proot)
+	glob, err := ingest.NewExternalGlob("/usr/include/**")
+	if err != nil {
+		t.Fatalf("NewExternalGlob: %v", err)
+	}
+	sum, err := ingest.Sources(db, mustCrawl(t, bdir), mustIntrospect(t, bdir), pr,
+		ingest.SourcesOptions{ExternalGlobs: []ingest.ExternalGlob{glob}})
+	if err != nil {
+		t.Fatalf("Sources: %v", err)
+	}
+	if sum.ExternalFiles == 0 {
+		t.Fatalf("expected external_sources rows; got 0")
+	}
+
+	var n int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM external_sources WHERE abs_path = '/usr/include/stdio.h'`,
+	).Scan(&n); err != nil {
+		t.Fatalf("query external_sources: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected /usr/include/stdio.h in external_sources; got %d rows", n)
+	}
+
+	// Blob content of the packed header must byte-match the on-disk file.
+	live, err := os.ReadFile("/usr/include/stdio.h")
+	if err != nil {
+		t.Fatalf("read live stdio.h: %v", err)
+	}
+	packed := fetchExternalBlob(t, db, "/usr/include/stdio.h")
+	if !bytes.Equal(packed, live) {
+		t.Errorf("packed /usr/include/stdio.h differs from on-disk copy (%d vs %d bytes)", len(packed), len(live))
+	}
+}
+
+// TestSourcesExternalGlobZeroMatch: a glob that matches nothing is a hard
+// error, on the same rationale as an unknown --target name.
+func TestSourcesExternalGlobZeroMatch(t *testing.T) {
+	repo := repoRoot(t)
+	bdir := filepath.Join(repo, "testdata", "fixture", "builddir")
+	proot := filepath.Join(repo, "testdata", "fixture")
+
+	db := freshDB(t)
+	pr := mustResolver(t, bdir, proot)
+	glob, err := ingest.NewExternalGlob("/definitely/not/a/real/path/**")
+	if err != nil {
+		t.Fatalf("NewExternalGlob: %v", err)
+	}
+	_, err = ingest.Sources(db, mustCrawl(t, bdir), mustIntrospect(t, bdir), pr,
+		ingest.SourcesOptions{ExternalGlobs: []ingest.ExternalGlob{glob}})
+	if err == nil {
+		t.Fatalf("expected zero-match glob to error; got nil")
+	}
+	if !strings.Contains(err.Error(), "matched zero headers") {
+		t.Errorf("expected 'matched zero headers' error, got: %v", err)
+	}
+}
+
+func fetchExternalBlob(t *testing.T, db *sql.DB, absPath string) []byte {
+	t.Helper()
+	var compressed []byte
+	if err := db.QueryRow(
+		`SELECT b.content FROM blobs b JOIN external_sources es ON es.blob_hash = b.hash WHERE es.abs_path = ?`,
+		absPath,
+	).Scan(&compressed); err != nil {
+		t.Fatalf("fetch external blob %q: %v", absPath, err)
+	}
+	dec, err := zstd.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		t.Fatalf("zstd reader: %v", err)
+	}
+	defer dec.Close()
+	raw, err := io.ReadAll(dec)
+	if err != nil {
+		t.Fatalf("zstd read: %v", err)
+	}
+	return raw
+}

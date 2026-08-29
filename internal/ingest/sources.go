@@ -17,10 +17,15 @@ import (
 // SourcesSummary counts what Sources wrote so the collect summary can
 // display it.
 type SourcesSummary struct {
-	Files      int // number of `sources` rows inserted/updated
-	Blobs      int // number of new blobs written (post-dedup)
-	Duplicates int // number of Put calls whose content already existed
-	Generated  int // count of files classified as generated
+	Files          int // number of `sources` rows inserted/updated
+	Blobs          int // number of new blobs written (post-dedup)
+	Duplicates     int // number of Put calls whose content already existed
+	Generated      int // count of files classified as generated (in-tree, sources.is_generated=1)
+	ExternalFiles  int // rows written to external_sources (0 when no globs)
+	ExternalBlobs  int // subset of Blobs contributed by external headers
+	GeneratedFiles int // rows written to generated_sources (out-of-tree build outputs)
+	GeneratedBlobs int // subset of Blobs contributed by generated_sources
+	GlobMatchCount map[string]int
 }
 
 // SourcesOptions tunes packing. Strict enforces the risk-mitigation rule
@@ -29,7 +34,8 @@ type SourcesSummary struct {
 // happen right after a build and mtime skew is normal for editors that
 // touch-save.
 type SourcesOptions struct {
-	Strict bool
+	Strict          bool
+	ExternalGlobs   []ExternalGlob
 }
 
 // Sources packs every source and header the build touched into the
@@ -89,6 +95,31 @@ func Sources(db *sql.DB, bd *builddir.BuildDir, intro *mesonintrospect.Introspec
 		}
 	}
 
+	// externalEntries is the parallel bucket for headers matched by
+	// --include-external globs. Keyed by absolute path so duplicates from
+	// many TUs collapse before we touch the filesystem.
+	externalEntries := map[string]struct{}{}
+	globHits := make(map[string]int, len(opts.ExternalGlobs))
+	for _, g := range opts.ExternalGlobs {
+		globHits[g.Raw()] = 0
+	}
+
+	// generatedEntries is the parallel bucket for build-tree files (files
+	// under bd.Root that aren't in --project-root). Keyed by builddir-
+	// relative path so the value is portable across machines.
+	generatedEntries := map[string]string{} // builddirRel → absPath
+
+	markGenerated := func(abs string) {
+		rel, err := filepath.Rel(bd.Root, abs)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return
+		}
+		key := filepath.ToSlash(rel)
+		if _, seen := generatedEntries[key]; !seen {
+			generatedEntries[key] = abs
+		}
+	}
+
 	// Pass 1: target sources + generated sources from Meson.
 	for _, t := range intro.Targets {
 		for _, abs := range t.Sources {
@@ -103,12 +134,28 @@ func Sources(db *sql.DB, bd *builddir.BuildDir, intro *mesonintrospect.Introspec
 		}
 		for _, abs := range t.Generated {
 			r := pr.ToProjectRelative(abs)
-			if !r.InProject {
-				return SourcesSummary{}, fmt.Errorf(
-					"ingest/sources: target %q generated source %q is outside --project-root %q",
-					t.Name, abs, pr.ProjectRoot)
+			if r.InProject {
+				// In-tree builddir: keep the historical shape (goes to
+				// sources with is_generated=1) so agents that grew up
+				// on that layout keep working.
+				mark(r.Rel, filepath.Join(pr.ProjectRoot, filepath.FromSlash(r.Rel)), true, true, "")
+				continue
 			}
-			mark(r.Rel, filepath.Join(pr.ProjectRoot, filepath.FromSlash(r.Rel)), true, true, "")
+			// Out-of-tree: pack via generated_sources if the file lives
+			// under builddir, which it must for anything Meson labels
+			// as generated. Truly-outside paths remain a hard error —
+			// that's a genuinely broken introspection.
+			absNative, err := filepath.Abs(abs)
+			if err != nil {
+				return SourcesSummary{}, fmt.Errorf(
+					"ingest/sources: target %q generated source %q: abs: %w", t.Name, abs, err)
+			}
+			if !isUnderBuildDir(absNative, bd.Root) {
+				return SourcesSummary{}, fmt.Errorf(
+					"ingest/sources: target %q generated source %q is outside both --project-root %q and --builddir %q",
+					t.Name, abs, pr.ProjectRoot, bd.Root)
+			}
+			markGenerated(absNative)
 		}
 	}
 
@@ -135,7 +182,27 @@ func Sources(db *sql.DB, bd *builddir.BuildDir, intro *mesonintrospect.Introspec
 				// "../lib/x.c") or absolute (system headers).
 				r := pr.ToProjectRelative(dep)
 				if !r.InProject {
-					// System header or otherwise out-of-tree: skip.
+					abs := dep
+					if !filepath.IsAbs(abs) {
+						abs = filepath.Join(bd.Root, abs)
+					}
+					abs = filepath.Clean(abs)
+					// Under builddir → generated_sources unconditionally.
+					// The build produced these files; agents inspecting
+					// the artifact need them regardless of --include-external.
+					if isUnderBuildDir(abs, bd.Root) {
+						markGenerated(abs)
+						continue
+					}
+					// Outside both project-root and builddir → external
+					// glob or skip.
+					for _, g := range opts.ExternalGlobs {
+						if g.Match(abs) {
+							externalEntries[abs] = struct{}{}
+							globHits[g.Raw()]++
+							break
+						}
+					}
 					continue
 				}
 				absPath := filepath.Join(pr.ProjectRoot, filepath.FromSlash(r.Rel))
@@ -203,6 +270,85 @@ func Sources(db *sql.DB, bd *builddir.BuildDir, intro *mesonintrospect.Introspec
 			sum.Generated++
 		}
 	}
+
+	// Generated (build-tree) files, sorted for determinism. Missing files
+	// are silently skipped (a custom_target output may have been cleaned
+	// between build and ingest).
+	if len(generatedEntries) > 0 {
+		keys := make([]string, 0, len(generatedEntries))
+		for k := range generatedEntries {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			abs := generatedEntries[k]
+			content, err := os.ReadFile(abs)
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				return SourcesSummary{}, fmt.Errorf("ingest/sources: read generated %s: %w", abs, err)
+			}
+			res, err := w.PutGenerated(k, content)
+			if err != nil {
+				return SourcesSummary{}, err
+			}
+			sum.GeneratedFiles++
+			if !res.Deduplicated {
+				sum.GeneratedBlobs++
+				sum.Blobs++
+			} else {
+				sum.Duplicates++
+			}
+		}
+	}
+
+	// External headers, in sorted order for determinism. Missing files
+	// are silently skipped (same rationale as .ninja_deps entries above —
+	// a header may have been renamed since the last build).
+	if len(externalEntries) > 0 {
+		absPaths := make([]string, 0, len(externalEntries))
+		for p := range externalEntries {
+			absPaths = append(absPaths, p)
+		}
+		sort.Strings(absPaths)
+		for _, abs := range absPaths {
+			content, err := os.ReadFile(abs)
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				return SourcesSummary{}, fmt.Errorf("ingest/sources: read external %s: %w", abs, err)
+			}
+			res, err := w.PutExternal(abs, content)
+			if err != nil {
+				return SourcesSummary{}, err
+			}
+			sum.ExternalFiles++
+			if !res.Deduplicated {
+				sum.ExternalBlobs++
+				sum.Blobs++
+			} else {
+				sum.Duplicates++
+			}
+		}
+	}
+
+	// Zero-match glob is a hard error, on the same rationale as the
+	// --target unknown-name check: silent no-op hides typos.
+	var zero []string
+	for pat, n := range globHits {
+		if n == 0 {
+			zero = append(zero, pat)
+		}
+	}
+	if len(zero) > 0 {
+		sort.Strings(zero)
+		return SourcesSummary{}, fmt.Errorf(
+			"ingest/sources: --include-external glob(s) matched zero headers: %s",
+			strings.Join(zero, ", "))
+	}
+	sum.GlobMatchCount = globHits
 
 	if err := w.Commit(); err != nil {
 		return SourcesSummary{}, err
