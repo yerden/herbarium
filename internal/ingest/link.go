@@ -68,6 +68,16 @@ func Link(db *sql.DB, bd *builddir.BuildDir, intro *mesonintrospect.Introspectio
 	// Precompute map: target name → linker map path (top-level builddir).
 	mapByTarget := indexMapFiles(bd)
 
+	// One nm scan across every .o in the builddir, keyed by symbol name.
+	// Serves two roles: (a) fallback for winning_object when no map file
+	// is present, (b) always-on enumeration of loser candidates for
+	// losing_objects. Object paths are builddir-relative so they line up
+	// with the map file's SymbolOrigin convention.
+	defsByName, err := scanBuilddirObjectDefs(bd)
+	if err != nil {
+		return LinkSummary{}, err
+	}
+
 	var sum LinkSummary
 	// Sort targets deterministically.
 	targets := append([]mesonintrospect.Target(nil), intro.Targets...)
@@ -103,9 +113,11 @@ func Link(db *sql.DB, bd *builddir.BuildDir, intro *mesonintrospect.Introspectio
 		// Build the per-target address-based resolver: each defined
 		// function symbol in this binary maps to its symbols row id via
 		// USR construction. For internal-linkage rows the source path is
-		// pulled from the map file's SymbolOrigin → objectToSource chain;
-		// this is what disambiguates same-named statics across TUs.
-		addrToID := buildAddrIndex(syms, mf, objectToSource, usrToID, nameToID)
+		// pulled from the map file's SymbolOrigin → objectToSource chain
+		// when a map is present; otherwise from defsByName when the name
+		// has exactly one candidate object. This is what disambiguates
+		// same-named statics across TUs.
+		addrToID := buildAddrIndex(syms, mf, defsByName, objectToSource, usrToID, nameToID)
 
 		// link_resolutions: one row per symbol in this binary that we
 		// know about at the source level.
@@ -115,20 +127,26 @@ func Link(db *sql.DB, bd *builddir.BuildDir, intro *mesonintrospect.Introspectio
 			if s.LinkageKind() == "" {
 				continue
 			}
-			symID, ok := resolveNMSymbol(s, mf, objectToSource, usrToID, nameToID)
+			symID, ok := resolveNMSymbol(s, mf, defsByName, objectToSource, usrToID, nameToID)
 			if !ok {
 				continue
 			}
 
 			winningObj := ""
-			archive := ""
 			if mf != nil {
 				if orig, ok := mf.SymbolOrigin[s.Name]; ok {
 					winningObj = orig
-					archive = linkplane.ArchiveFor(orig)
 				}
 			}
-			losingJSON, _ := json.Marshal([]string{})
+			if winningObj == "" {
+				winningObj = pickWinningObject(defsByName[s.Name])
+			}
+			archive := ""
+			if winningObj != "" {
+				archive = linkplane.ArchiveFor(winningObj)
+			}
+			losers := collectLosingObjects(defsByName[s.Name], winningObj)
+			losingJSON, _ := json.Marshal(losers)
 			if _, err := lrStmt.Exec(targetID, usrByID[symID], winningObj, s.LinkageKind(), string(losingJSON), archive); err != nil {
 				return LinkSummary{}, fmt.Errorf("ingest/link: link_resolutions %s: %w", s.Name, err)
 			}
@@ -183,45 +201,66 @@ func Link(db *sql.DB, bd *builddir.BuildDir, intro *mesonintrospect.Introspectio
 // row id in `symbols`. For external-linkage rows the USR is
 // `c:@F@<name>` (or `@V@` for data), so a name lookup is unambiguous.
 // For internal-linkage rows the USR needs the defining TU's source
-// path; we recover it from the map file's SymbolOrigin → objectToSource
-// chain. Returns ok=false when we can't attribute the symbol to a known
-// source row — the caller skips such symbols rather than pick a wrong
-// candidate. Without a map file we cannot disambiguate internal-linkage
-// names, so we defer to nameToID's prefer-defined heuristic.
-func resolveNMSymbol(s linkplane.NMSymbol, mf *linkplane.MapFile, objectToSource map[string]string, usrToID, nameToID map[string]int64) (int64, bool) {
+// path; we recover it from (1) the map file's SymbolOrigin when a map
+// is present, else (2) defsByName when the name has exactly one
+// candidate .o (the unambiguous case). Returns ok=false when we can't
+// attribute the symbol to a known source row — the caller skips such
+// symbols rather than pick a wrong candidate. Same-named statics in
+// two TUs of the same target without a map cannot be disambiguated;
+// we fall back to nameToID's prefer-defined heuristic there.
+func resolveNMSymbol(s linkplane.NMSymbol, mf *linkplane.MapFile, defsByName map[string][]linkplane.ObjectDef, objectToSource map[string]string, usrToID, nameToID map[string]int64) (int64, bool) {
 	if !s.Local() {
 		// External linkage: unique USR, prefer the definition-bearing row
 		// via the shared name lookup.
 		id, ok := nameToID[s.Name]
 		return id, ok
 	}
-	if mf != nil {
-		obj, ok := mf.SymbolOrigin[s.Name]
-		if ok {
-			if src, ok := objectToSource[obj]; ok {
-				u := usr.Function(src, s.Name)
-				if s.Kind == "d" || s.Kind == "b" || s.Kind == "r" {
-					u = usr.Variable(src, s.Name)
-				}
-				if id, ok := usrToID[u]; ok {
-					return id, true
-				}
-			}
+	if id, ok := resolveStaticViaObject(s, mapObjectFor(mf, s.Name), objectToSource, usrToID); ok {
+		return id, true
+	}
+	if len(defsByName[s.Name]) == 1 {
+		if id, ok := resolveStaticViaObject(s, defsByName[s.Name][0].Object, objectToSource, usrToID); ok {
+			return id, true
 		}
 	}
-	// No map file or unresolvable object: fall back to the shared name
-	// lookup — imperfect for same-named statics across TUs, but the
+	// Multiple candidates or nothing resolvable: fall back to the shared
+	// name lookup — imperfect for same-named statics across TUs, but the
 	// prefer-defined guard at least keeps declaration-only rows from
 	// winning.
 	id, ok := nameToID[s.Name]
 	return id, ok
 }
 
+// resolveStaticViaObject builds the TU-scoped USR for a local symbol
+// given the object that supplied it, and looks up the row id.
+func resolveStaticViaObject(s linkplane.NMSymbol, obj string, objectToSource map[string]string, usrToID map[string]int64) (int64, bool) {
+	if obj == "" {
+		return 0, false
+	}
+	src, ok := objectToSource[obj]
+	if !ok {
+		return 0, false
+	}
+	u := usr.Function(src, s.Name)
+	if s.Kind == "d" || s.Kind == "b" || s.Kind == "r" {
+		u = usr.Variable(src, s.Name)
+	}
+	id, ok := usrToID[u]
+	return id, ok
+}
+
+func mapObjectFor(mf *linkplane.MapFile, name string) string {
+	if mf == nil {
+		return ""
+	}
+	return mf.SymbolOrigin[name]
+}
+
 // buildAddrIndex maps every defined-function address in the linked
 // binary to the correct symbols row id, per the same disambiguation
 // rules as resolveNMSymbol. objdump's edge resolver keys on this map
 // so a same-named static in a different TU doesn't collapse.
-func buildAddrIndex(syms []linkplane.NMSymbol, mf *linkplane.MapFile, objectToSource map[string]string, usrToID, nameToID map[string]int64) map[uint64]int64 {
+func buildAddrIndex(syms []linkplane.NMSymbol, mf *linkplane.MapFile, defsByName map[string][]linkplane.ObjectDef, objectToSource map[string]string, usrToID, nameToID map[string]int64) map[uint64]int64 {
 	out := make(map[uint64]int64, len(syms))
 	for _, s := range syms {
 		if !s.IsFunction() || s.Address == "" {
@@ -231,13 +270,94 @@ func buildAddrIndex(syms []linkplane.NMSymbol, mf *linkplane.MapFile, objectToSo
 		if err != nil {
 			continue
 		}
-		id, ok := resolveNMSymbol(s, mf, objectToSource, usrToID, nameToID)
+		id, ok := resolveNMSymbol(s, mf, defsByName, objectToSource, usrToID, nameToID)
 		if !ok {
 			continue
 		}
 		out[addr] = id
 	}
 	return out
+}
+
+// scanBuilddirObjectDefs runs nm across every .o in the builddir and
+// returns the global name→candidates index, with object paths converted
+// to builddir-relative form so they line up with map-file conventions
+// (SymbolOrigin values look like "app1/app1.p/main.c.o").
+func scanBuilddirObjectDefs(bd *builddir.BuildDir) (map[string][]linkplane.ObjectDef, error) {
+	objects := make([]string, 0, len(bd.Objects))
+	for _, o := range bd.Objects {
+		objects = append(objects, o.Object)
+	}
+	absDefs, err := linkplane.ScanObjectDefs(objects)
+	if err != nil {
+		return nil, fmt.Errorf("ingest/link: scan object defs: %w", err)
+	}
+	out := make(map[string][]linkplane.ObjectDef, len(absDefs))
+	for name, entries := range absDefs {
+		for _, e := range entries {
+			rel, err := filepath.Rel(bd.Root, e.Object)
+			if err != nil {
+				rel = e.Object
+			}
+			out[name] = append(out[name], linkplane.ObjectDef{
+				Object: filepath.ToSlash(rel),
+				Kind:   e.Kind,
+			})
+		}
+	}
+	return out, nil
+}
+
+// pickWinningObject reproduces (approximately) ld's choice among
+// candidate objects that define a symbol, for the case where no linker
+// map file recorded the actual choice. Preference is
+// strong > weak > local; ties are broken by sorted object path so runs
+// are deterministic. Returns "" when there are no candidates.
+func pickWinningObject(cands []linkplane.ObjectDef) string {
+	if len(cands) == 0 {
+		return ""
+	}
+	rank := func(kind string) int {
+		switch kind {
+		case "T", "D", "B", "R":
+			return 3
+		case "W", "V":
+			return 2
+		case "C":
+			return 1
+		}
+		if len(kind) == 1 && kind[0] >= 'a' && kind[0] <= 'z' {
+			return 0
+		}
+		return -1
+	}
+	sorted := append([]linkplane.ObjectDef(nil), cands...)
+	sort.Slice(sorted, func(i, j int) bool {
+		ri, rj := rank(sorted[i].Kind), rank(sorted[j].Kind)
+		if ri != rj {
+			return ri > rj
+		}
+		return sorted[i].Object < sorted[j].Object
+	})
+	return sorted[0].Object
+}
+
+// collectLosingObjects returns candidate objects minus the winner,
+// sorted for stability. Definitionally broader than a strict map-file
+// implementation: includes archive members ld may never have pulled in,
+// because nm sees every .o on disk. Empty when there are no losers.
+func collectLosingObjects(cands []linkplane.ObjectDef, winner string) []string {
+	losers := make([]string, 0, len(cands))
+	seen := map[string]bool{}
+	for _, c := range cands {
+		if c.Object == winner || seen[c.Object] {
+			continue
+		}
+		seen[c.Object] = true
+		losers = append(losers, c.Object)
+	}
+	sort.Strings(losers)
+	return losers
 }
 
 // buildSymbolLookup returns two maps:

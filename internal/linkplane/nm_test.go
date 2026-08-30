@@ -74,6 +74,40 @@ func TestRunNMDefinedApp2(t *testing.T) {
 	}
 }
 
+func TestScanObjectDefs(t *testing.T) {
+	bd := filepath.Join(repoRoot(t), "testdata", "fixture", "builddir")
+	objects := []string{
+		filepath.Join(bd, "app1/app1.p/strong_override.c.o"),
+		filepath.Join(bd, "app1/app1.p/main.c.o"),
+		filepath.Join(bd, "lib/libshared.a.p/weak_impl.c.o"),
+		filepath.Join(bd, "lib/libshared.a.p/shared_utils.c.o"),
+	}
+	defs, err := linkplane.ScanObjectDefs(objects)
+	if err != nil {
+		t.Fatalf("ScanObjectDefs: %v", err)
+	}
+	// hook: strong def in strong_override.c.o, weak def in weak_impl.c.o.
+	hooks := defs["hook"]
+	if len(hooks) != 2 {
+		t.Fatalf("hook candidates = %d, want 2 (strong + weak)", len(hooks))
+	}
+	byObj := map[string]string{}
+	for _, d := range hooks {
+		byObj[filepath.Base(d.Object)] = d.Kind
+	}
+	if got := byObj["strong_override.c.o"]; got != "T" {
+		t.Errorf("hook @ strong_override.c.o kind = %q, want T", got)
+	}
+	if got := byObj["weak_impl.c.o"]; got != "W" {
+		t.Errorf("hook @ weak_impl.c.o kind = %q, want W", got)
+	}
+	// add_ints only in shared_utils.c.o.
+	adds := defs["add_ints"]
+	if len(adds) != 1 || filepath.Base(adds[0].Object) != "shared_utils.c.o" {
+		t.Errorf("add_ints candidates = %v, want one in shared_utils.c.o", adds)
+	}
+}
+
 func TestRunNMUndefined(t *testing.T) {
 	binary := filepath.Join(repoRoot(t), "testdata", "fixture", "builddir", "app1", "app1")
 	syms, err := linkplane.RunNMUndefined(binary)

@@ -92,6 +92,39 @@ func RunNMUndefined(path string) ([]NMSymbol, error) {
 	return parseNMPosix(string(stdout))
 }
 
+// ObjectDef pairs a .o path with the nm kind code of one defined symbol
+// observed in it. ScanObjectDefs produces these so ingest.Link can
+// enumerate every candidate object that defines a given symbol name —
+// used for winning_object attribution when no linker map is available
+// and for losing_objects enumeration in every case.
+type ObjectDef struct {
+	Object string
+	Kind   string
+}
+
+// ScanObjectDefs runs `nm --defined-only` on every path in objects and
+// returns a symbol-name → observation-list index. Each observation
+// preserves the caller's object path verbatim (caller decides absolute
+// vs builddir-relative) and the raw nm kind code so callers can apply
+// their own strong/weak/local classification. A failure on any single
+// path aborts the whole scan.
+func ScanObjectDefs(objects []string) (map[string][]ObjectDef, error) {
+	out := map[string][]ObjectDef{}
+	for _, obj := range objects {
+		syms, err := RunNMDefined(obj)
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range syms {
+			if s.Kind == "" || s.Name == "" {
+				continue
+			}
+			out[s.Name] = append(out[s.Name], ObjectDef{Object: obj, Kind: s.Kind})
+		}
+	}
+	return out, nil
+}
+
 // parseNMPosix parses lines like:
 //
 //	compute T 11d0 29                     ← defined, 3-4 fields

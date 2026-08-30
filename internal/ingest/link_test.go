@@ -2,6 +2,7 @@ package ingest_test
 
 import (
 	"database/sql"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 
@@ -108,6 +109,57 @@ func TestLinkResolutionsWeakStrong(t *testing.T) {
 	}
 	if archive != "lib/libshared.a" {
 		t.Errorf("app2.hook archive = %q, want lib/libshared.a", archive)
+	}
+}
+
+func TestLinkResolutionsLosingObjects(t *testing.T) {
+	path := runFullIngest(t)
+	db, err := store.OpenReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	defer db.Close()
+
+	// hook has two on-disk defs: strong in app1/app1.p/strong_override.c.o,
+	// weak in lib/libshared.a.p/weak_impl.c.o. Whichever wins for a given
+	// target, the other should appear in losing_objects. The nm scan is
+	// unscoped by target, so cross-target defs (strong_override in app2)
+	// also surface — the description acknowledges this.
+	cases := []struct {
+		target     string
+		wantWinner string
+		wantLoser  string
+	}{
+		{"app1", "app1/app1.p/strong_override.c.o", "lib/libshared.a.p/weak_impl.c.o"},
+		{"app2", "lib/libshared.a.p/weak_impl.c.o", "app1/app1.p/strong_override.c.o"},
+	}
+	for _, tc := range cases {
+		var winner, losingJSON string
+		if err := db.QueryRow(`
+			SELECT lr.winning_object, lr.losing_objects
+			FROM link_resolutions lr
+			JOIN targets t ON lr.target_id = t.id
+			JOIN symbols s ON lr.usr = s.usr
+			WHERE t.name = ? AND s.name = 'hook'
+		`, tc.target).Scan(&winner, &losingJSON); err != nil {
+			t.Fatalf("query %s.hook: %v", tc.target, err)
+		}
+		if winner != tc.wantWinner {
+			t.Errorf("%s.hook winning_object = %q, want %q", tc.target, winner, tc.wantWinner)
+		}
+		var losers []string
+		if err := json.Unmarshal([]byte(losingJSON), &losers); err != nil {
+			t.Fatalf("%s.hook losing_objects unmarshal: %v (raw=%q)", tc.target, err, losingJSON)
+		}
+		found := false
+		for _, l := range losers {
+			if l == tc.wantLoser {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s.hook losing_objects = %v, want to include %q", tc.target, losers, tc.wantLoser)
+		}
 	}
 }
 

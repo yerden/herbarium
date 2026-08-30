@@ -17,9 +17,14 @@ func (s *Server) registerLinkageTools() {
 	s.mcp.AddTool(newTool("describe_link_resolution",
 		mcp.WithDescription(
 			"Which object supplied a symbol in the given target: winning object, "+
-				"linkage kind, losing objects (when a linker map is available), and "+
-				"containing archive. The only reliable way to know which malloc "+
-				"actually runs in a binary.",
+				"linkage kind, other objects in the builddir that also define this "+
+				"symbol (losing_objects), and containing archive. winning_object "+
+				"reflects the linker's actual choice when a .map file is available; "+
+				"otherwise it is picked heuristically from an nm scan (strong > weak, "+
+				"deterministic tie-break). losing_objects is always derived from the "+
+				"nm scan, so it may include archive members the linker never actually "+
+				"pulled in — read it as 'other .o's that could have supplied this "+
+				"symbol', not 'candidates ld weighed and rejected'.",
 		),
 		mcp.WithString("usr", mcp.Required(),
 			mcp.Description("USR of the symbol (from find_symbol.hits[].usr or describe_symbol.usr).")),
@@ -41,10 +46,13 @@ func (s *Server) registerLinkageTools() {
 			"Externals this target references via a direct call but has no observed "+
 				"definition for anywhere in the index (typical example: libc's printf). "+
 				"Derived from objdump call edges minus symbol_definitions. Objdump "+
-				"edges are attributed by branch-target address (map-file assisted), so "+
+				"edges are attributed by branch-target address using a map file when "+
+				"present and otherwise a per-.o nm scan (unique-candidate lookup), so "+
 				"internal-linkage callees sharing a name with an undefined external do "+
-				"not surface here as phantom undefineds when a linker map is present; "+
-				"without one, name-based fallback may still cause misattribution.",
+				"not surface here as phantom undefineds in either mode. The remaining "+
+				"ambiguous case — two same-named statics in two TUs of the same "+
+				"target with no map file — falls back to name lookup and may still "+
+				"misattribute.",
 		),
 		mcp.WithString("target", mcp.Required(),
 			mcp.Description("Target binary name — undefined externals are per-target.")),

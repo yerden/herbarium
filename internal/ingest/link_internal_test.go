@@ -61,12 +61,40 @@ func TestResolveNMSymbolInternalLinkage(t *testing.T) {
 	}}
 	s := linkplane.NMSymbol{Name: "flw_net_parse_mpls", Kind: "t", Address: "11a0"}
 
-	got, ok := resolveNMSymbol(s, mf, objectToSource, usrToID, nameToID)
+	got, ok := resolveNMSymbol(s, mf, nil, objectToSource, usrToID, nameToID)
 	if !ok {
 		t.Fatalf("resolveNMSymbol: not found")
 	}
 	if got != 20 {
 		t.Errorf("resolveNMSymbol = %d, want 20 (serializer.c copy)", got)
+	}
+}
+
+// TestResolveNMSymbolInternalLinkageNoMap guards the map-file-less
+// fallback: when defsByName has exactly one candidate object for a
+// local-symbol name, the resolver picks it and constructs the TU-
+// scoped USR. This is the path exercised when a target links without
+// -Wl,-Map=. Multi-candidate case remains ambiguous and falls back to
+// nameToID.
+func TestResolveNMSymbolInternalLinkageNoMap(t *testing.T) {
+	usrToID := map[string]int64{
+		"c:lib/net/serializer.c@F@flw_net_parse_mpls": 20,
+	}
+	nameToID := map[string]int64{"flw_net_parse_mpls": 10}
+	objectToSource := map[string]string{
+		"lib/libnet.a.p/serializer.c.o": "lib/net/serializer.c",
+	}
+	defsByName := map[string][]linkplane.ObjectDef{
+		"flw_net_parse_mpls": {{Object: "lib/libnet.a.p/serializer.c.o", Kind: "t"}},
+	}
+	s := linkplane.NMSymbol{Name: "flw_net_parse_mpls", Kind: "t", Address: "11a0"}
+
+	got, ok := resolveNMSymbol(s, nil, defsByName, objectToSource, usrToID, nameToID)
+	if !ok {
+		t.Fatalf("resolveNMSymbol: not found")
+	}
+	if got != 20 {
+		t.Errorf("resolveNMSymbol = %d, want 20 (serializer.c copy via defsByName)", got)
 	}
 }
 
@@ -78,7 +106,7 @@ func TestResolveNMSymbolExternalLinkage(t *testing.T) {
 	nameToID := map[string]int64{"compute": 42}
 	s := linkplane.NMSymbol{Name: "compute", Kind: "T", Address: "11e0"}
 
-	got, ok := resolveNMSymbol(s, nil, nil, usrToID, nameToID)
+	got, ok := resolveNMSymbol(s, nil, nil, nil, usrToID, nameToID)
 	if !ok || got != 42 {
 		t.Errorf("resolveNMSymbol = (%d, %v), want (42, true)", got, ok)
 	}
@@ -103,7 +131,7 @@ func TestBuildAddrIndexUsesResolveNMSymbol(t *testing.T) {
 	syms := []linkplane.NMSymbol{
 		{Name: "foo", Kind: "t", Address: "1234"},
 	}
-	got := buildAddrIndex(syms, mf, objectToSource, usrToID, nameToID)
+	got := buildAddrIndex(syms, mf, nil, objectToSource, usrToID, nameToID)
 	if id := got[0x1234]; id != 2 {
 		t.Errorf("addrToID[0x1234] = %d, want 2 (b.c copy per map file)", id)
 	}
