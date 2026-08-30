@@ -52,7 +52,7 @@ func runFullIngest(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("Targets: %v", err)
 	}
-	if _, err := ingest.Link(db, bd, intro, pr, targetIDs); err != nil {
+	if _, err := ingest.Link(db, bd, intro, pr, targetIDs, sum.ObjectToSource); err != nil {
 		t.Fatalf("Link: %v", err)
 	}
 	if err := db.Close(); err != nil {

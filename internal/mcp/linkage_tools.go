@@ -40,7 +40,11 @@ func (s *Server) registerLinkageTools() {
 		mcp.WithDescription(
 			"Externals this target references via a direct call but has no observed "+
 				"definition for anywhere in the index (typical example: libc's printf). "+
-				"Derived from objdump call edges minus symbol_definitions.",
+				"Derived from objdump call edges minus symbol_definitions. Objdump "+
+				"edges are attributed by branch-target address (map-file assisted), so "+
+				"internal-linkage callees sharing a name with an undefined external do "+
+				"not surface here as phantom undefineds when a linker map is present; "+
+				"without one, name-based fallback may still cause misattribution.",
 		),
 		mcp.WithString("target", mcp.Required(),
 			mcp.Description("Target binary name — undefined externals are per-target.")),

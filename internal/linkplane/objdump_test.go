@@ -18,6 +18,12 @@ func TestRunObjdumpApp1(t *testing.T) {
 	for _, e := range edges {
 		if e.Caller == "main" {
 			fromMain[e.CalleeStripped()] = true
+			// Addresses must be captured — link-plane resolution keys on
+			// them to disambiguate same-named statics across TUs.
+			if e.CallerAddr == 0 || e.CalleeAddr == 0 {
+				t.Errorf("app1 main → %s: missing addr (caller=%#x callee=%#x)",
+					e.CalleeStripped(), e.CallerAddr, e.CalleeAddr)
+			}
 		}
 	}
 	for _, want := range []string{"compute", "hook", "printf"} {

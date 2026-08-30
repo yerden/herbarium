@@ -68,7 +68,7 @@ func collectForTest(bdir, proot, out string) int {
 	if err != nil {
 		return 1
 	}
-	if _, err := ingest.Link(db, bd, intro, pr, tids); err != nil {
+	if _, err := ingest.Link(db, bd, intro, pr, tids, sum.ObjectToSource); err != nil {
 		return 1
 	}
 	if _, err := ingest.Sources(db, bd, intro, pr, ingest.SourcesOptions{}); err != nil {
@@ -131,7 +131,7 @@ func collectForTestWithGlobs(bdir, proot, out string, globs []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := ingest.Link(db, bd, intro, pr, tids); err != nil {
+	if _, err := ingest.Link(db, bd, intro, pr, tids, sum.ObjectToSource); err != nil {
 		return err
 	}
 	parsed := make([]ingest.ExternalGlob, 0, len(globs))

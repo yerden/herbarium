@@ -16,7 +16,10 @@ func (s *Server) registerCallGraphRuntimeTools() {
 			"Callers per objdump of the shipped binary (runtime view; post-inlining, "+
 				"post-optimization, per-target). Different answer than list_callers "+
 				"when inlining is aggressive; this is ground truth for 'what actually "+
-				"calls X at runtime'.",
+				"calls X at runtime'. Edges are resolved by branch-target address, so "+
+				"same-named internal-linkage callers across TUs are disambiguated when "+
+				"a linker map is present; without a map file the ingest falls back to "+
+				"name-based lookup and may collapse such collisions.",
 		),
 		mcp.WithString("callee_usr", mcp.Required(),
 			mcp.Description("USR of the callee (from find_symbol.hits[].usr or describe_symbol.usr).")),
@@ -30,7 +33,11 @@ func (s *Server) registerCallGraphRuntimeTools() {
 				"post-optimization, per-target). Different answer than list_callees "+
 				"when inlining is aggressive; the set difference "+
 				"list_callees − list_linked_callees is the definitive 'what got "+
-				"inlined or DCE'd into this caller for this target'.",
+				"inlined or DCE'd into this caller for this target'. Edges are resolved "+
+				"by branch-target address, so same-named internal-linkage callees across "+
+				"TUs are disambiguated when a linker map is present; without a map file "+
+				"the ingest falls back to name-based lookup and may collapse such "+
+				"collisions.",
 		),
 		mcp.WithString("caller_usr", mcp.Required(),
 			mcp.Description("USR of the caller (from find_symbol.hits[].usr or describe_symbol.usr).")),

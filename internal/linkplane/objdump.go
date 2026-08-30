@@ -3,15 +3,26 @@ package linkplane
 import (
 	"bufio"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 // ObjdumpEdge is one direct call/jump extracted from objdump -d output.
 // Indirect calls (call *…) are recorded separately by DWARF Phase 3;
 // this parser skips them.
+//
+// CallerAddr / CalleeAddr are the operand addresses in the linked binary
+// — the caller's function-label address and the callee's branch target.
+// They are the primary key for edge disambiguation when the callee's
+// linkage name collides across TUs (same-named statics); the name-based
+// fallback is only correct when the name is unambiguous. CalleeAddr for
+// PLT stubs points at the trampoline, not the callee proper — the
+// stripped name is the disambiguator there instead.
 type ObjdumpEdge struct {
-	Caller string // linkage name of the enclosing function
-	Callee string // raw linkage name from the disassembly (may include @plt)
+	Caller     string // linkage name of the enclosing function
+	CallerAddr uint64 // address of the function label in the linked binary
+	Callee     string // raw linkage name from the disassembly (may include @plt)
+	CalleeAddr uint64 // branch-target address; PLT stubs point at the trampoline
 }
 
 // CalleeStripped returns Callee with PLT and versioned-symbol decorations
@@ -27,12 +38,12 @@ func (e ObjdumpEdge) CalleeStripped() string {
 }
 
 var (
-	// "0000000000001040 <main>:"
-	odFuncRe = regexp.MustCompile(`^[0-9a-fA-F]+\s+<([^>]+)>:$`)
-	// "    104b:	call   11d0 <compute>"
+	// "0000000000001040 <main>:" — capture addr + name.
+	odFuncRe = regexp.MustCompile(`^([0-9a-fA-F]+)\s+<([^>]+)>:$`)
+	// "    104b:	call   11d0 <compute>" — capture callee addr + name.
 	// "    108b:	call   1030 <printf@plt>"
 	// (Direct — the operand is a hex address, no leading '*'.)
-	odDirectCallRe = regexp.MustCompile(`^\s+[0-9a-fA-F]+:\s+(?:call|jmp)\s+[0-9a-fA-F]+\s+<([^>]+)>`)
+	odDirectCallRe = regexp.MustCompile(`^\s+[0-9a-fA-F]+:\s+(?:call|jmp)\s+([0-9a-fA-F]+)\s+<([^>]+)>`)
 	// "    105c:	call   *0x2d5e(%rip)        # 3dc0 <g_ops>"
 	// Indirect calls start the operand with '*'. We don't record these
 	// as edges — DWARF Phase 3 already captured them with source
@@ -52,6 +63,7 @@ func RunObjdump(path string) ([]ObjdumpEdge, error) {
 func parseObjdump(out string) ([]ObjdumpEdge, error) {
 	var edges []ObjdumpEdge
 	var curFunc string
+	var curFuncAddr uint64
 	sc := bufio.NewScanner(strings.NewReader(out))
 	// Long .text sections can produce lines wider than the default 64K.
 	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
@@ -59,16 +71,20 @@ func parseObjdump(out string) ([]ObjdumpEdge, error) {
 	for sc.Scan() {
 		line := sc.Text()
 		if m := odFuncRe.FindStringSubmatch(line); m != nil {
-			curFunc = m[1]
+			curFunc = m[2]
+			curFuncAddr, _ = strconv.ParseUint(m[1], 16, 64)
 			continue
 		}
 		if curFunc == "" {
 			continue
 		}
 		if m := odDirectCallRe.FindStringSubmatch(line); m != nil {
+			addr, _ := strconv.ParseUint(m[1], 16, 64)
 			edges = append(edges, ObjdumpEdge{
-				Caller: curFunc,
-				Callee: m[1],
+				Caller:     curFunc,
+				CallerAddr: curFuncAddr,
+				Callee:     m[2],
+				CalleeAddr: addr,
 			})
 		}
 	}

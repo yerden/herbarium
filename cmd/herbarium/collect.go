@@ -128,7 +128,7 @@ func runCollect(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	linkSum, err := ingest.Link(db, bd, intro, pr, targetIDs)
+	linkSum, err := ingest.Link(db, bd, intro, pr, targetIDs, sum.ObjectToSource)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1

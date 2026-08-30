@@ -134,7 +134,32 @@ func Compiler(db *sql.DB, bd *builddir.BuildDir, pr *PathResolver) (Summary, err
 		return Summary{}, fmt.Errorf("ingest: commit: %w", err)
 	}
 	sum.IDByUSR = idByUSR
+	sum.ObjectToSource = buildObjectToSource(tus, bd.Root, pr)
 	return sum, nil
+}
+
+// buildObjectToSource inverts the per-TU CI Title into a builddir-
+// relative object path → project-relative source path map. Objects
+// without a .ci or without a resolvable in-project source contribute no
+// entry; the caller (ingest.Link) tolerates gaps by falling back to
+// name-based lookup for symbols whose object it cannot resolve.
+func buildObjectToSource(tus []*tuData, builddirRoot string, pr *PathResolver) map[string]string {
+	out := make(map[string]string, len(tus))
+	for _, tu := range tus {
+		if tu.ci == nil || tu.ci.Title == "" {
+			continue
+		}
+		src := pr.ToProjectRelative(tu.ci.Title)
+		if !src.InProject {
+			continue
+		}
+		rel, err := filepath.Rel(builddirRoot, tu.object)
+		if err != nil {
+			continue
+		}
+		out[filepath.ToSlash(rel)] = src.Rel
+	}
+	return out
 }
 
 // insertICFGroups walks each TU's parsed .icf dump and writes one
@@ -251,6 +276,12 @@ type Summary struct {
 	// idByUSR is exposed so the DWARF pass can look up symbol row ids
 	// by USR to UPSERT signatures and enrich decl locations.
 	IDByUSR map[string]int64
+	// ObjectToSource maps builddir-relative object path (as it appears in
+	// map files, e.g. "lib/libshared.a.p/shared_utils.c.o") to the
+	// project-relative source path (e.g. "lib/shared_utils.c"). Consumed
+	// by ingest.Link to translate map-file SymbolOrigin entries into the
+	// USR key `c:<src>@F@<name>` for internal-linkage disambiguation.
+	ObjectToSource map[string]string
 }
 
 // parseTU reads the four required dump kinds. Missing dumps are
