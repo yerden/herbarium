@@ -553,3 +553,343 @@ func startClientWithRoot(t *testing.T, hbrPath, projectRoot string) *mcpclient.C
 	}
 	return client
 }
+
+// TestSearchSourceLiteral: literal-substring search returns matches with
+// path/line/column/blob_hash/match_text populated. Fixture has 'add_ints'
+// in exactly four places (2 files under lib/, plus a header) — that count
+// is the schema-level assertion.
+func TestSearchSourceLiteral(t *testing.T) {
+	client := startClient(t, fixtureHBR(t))
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "search_source"
+	req.Params.Arguments = map[string]any{"pattern": "add_ints"}
+	res, err := client.CallTool(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("error: %s", textOf(t, res))
+	}
+	var payload herbmcp.SearchSourceResponse
+	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload.Total != 4 {
+		t.Errorf("Total = %d, want 4 (dispatch_impls.c, shared_utils.c ×2, shared_utils.h)", payload.Total)
+	}
+	if payload.Truncated {
+		t.Error("Truncated=true on a 4-match query with default limit")
+	}
+	for _, m := range payload.Matches {
+		if m.Location.Path == "" || m.Location.Line == 0 || m.Location.Column == 0 {
+			t.Errorf("incomplete location: %+v", m.Location)
+		}
+		if m.Location.BlobHash == "" {
+			t.Errorf("%s:%d: BlobHash empty", m.Location.Path, m.Location.Line)
+		}
+		if m.MatchText != "add_ints" {
+			t.Errorf("%s:%d: MatchText = %q, want add_ints", m.Location.Path, m.Location.Line, m.MatchText)
+		}
+		if m.Location.Snippet == nil || m.Location.Snippet.Text == "" {
+			t.Errorf("%s:%d: snippet empty", m.Location.Path, m.Location.Line)
+		}
+	}
+}
+
+// TestSearchSourceMultipleMatchesPerLine: shared_utils.c line 12 has
+// 'add_ints(a, b) + mul_ints(a, b)'; searching '_ints' must surface both
+// on that line as distinct entries with different columns.
+func TestSearchSourceMultipleMatchesPerLine(t *testing.T) {
+	client := startClient(t, fixtureHBR(t))
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "search_source"
+	req.Params.Arguments = map[string]any{
+		"pattern":     "_ints",
+		"path_prefix": "lib/shared_utils.c",
+	}
+	res, err := client.CallTool(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("error: %s", textOf(t, res))
+	}
+	var payload herbmcp.SearchSourceResponse
+	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// Collect matches at line 12; expect exactly two with distinct columns.
+	var line12 []int
+	for _, m := range payload.Matches {
+		if m.Location.Line == 12 {
+			line12 = append(line12, m.Location.Column)
+		}
+	}
+	if len(line12) != 2 {
+		t.Fatalf("line 12 matches = %v, want 2 (add_ints and mul_ints)", line12)
+	}
+	if line12[0] == line12[1] {
+		t.Errorf("two matches at same column %d on line 12", line12[0])
+	}
+}
+
+// TestSearchSourceRegex: RE2 search finds function-definition-shaped
+// lines. Also asserts that a malformed regex surfaces as a tool error.
+func TestSearchSourceRegex(t *testing.T) {
+	client := startClient(t, fixtureHBR(t))
+
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "search_source"
+	req.Params.Arguments = map[string]any{
+		"pattern": `^int\s+main\(`,
+		"regex":   true,
+	}
+	res, err := client.CallTool(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("error: %s", textOf(t, res))
+	}
+	var payload herbmcp.SearchSourceResponse
+	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload.Total != 2 {
+		t.Errorf("Total = %d, want 2 (app1/main.c + app2/main.c)", payload.Total)
+	}
+	if !payload.IsRegex {
+		t.Error("IsRegex flag not set in response")
+	}
+	for _, m := range payload.Matches {
+		if !strings.HasSuffix(m.Location.Path, "main.c") {
+			t.Errorf("unexpected path %q", m.Location.Path)
+		}
+	}
+
+	// Malformed regex → tool error.
+	req.Params.Arguments = map[string]any{
+		"pattern": `(`,
+		"regex":   true,
+	}
+	res, err = client.CallTool(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Errorf("expected IsError=true for malformed regex; got %s", textOf(t, res))
+	}
+}
+
+// TestSearchSourceFilters: kind and target both trim the result set to
+// the expected shape.
+func TestSearchSourceFilters(t *testing.T) {
+	client := startClient(t, fixtureHBR(t))
+
+	// kind=header restricts to .h files; the dispatch header carries
+	// 'struct ops'.
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "search_source"
+	req.Params.Arguments = map[string]any{
+		"pattern": "struct ops",
+		"kind":    "header",
+	}
+	res, err := client.CallTool(context.Background(), req)
+	if err != nil {
+		t.Fatalf("kind CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("kind error: %s", textOf(t, res))
+	}
+	var kindPayload herbmcp.SearchSourceResponse
+	if err := json.Unmarshal([]byte(textOf(t, res)), &kindPayload); err != nil {
+		t.Fatalf("kind unmarshal: %v", err)
+	}
+	if kindPayload.Total == 0 {
+		t.Error("kind=header: no matches for 'struct ops'")
+	}
+	for _, m := range kindPayload.Matches {
+		if !strings.HasSuffix(m.Location.Path, ".h") {
+			t.Errorf("kind=header returned non-header %q", m.Location.Path)
+		}
+	}
+
+	// target=app1 restricts to app1's source list; a pattern that only
+	// exists in app1/main.c should hit, and app2 sources should not.
+	req.Params.Arguments = map[string]any{
+		"pattern": "app1:",
+		"target":  "app1",
+	}
+	res, err = client.CallTool(context.Background(), req)
+	if err != nil {
+		t.Fatalf("target CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("target error: %s", textOf(t, res))
+	}
+	var targetPayload herbmcp.SearchSourceResponse
+	if err := json.Unmarshal([]byte(textOf(t, res)), &targetPayload); err != nil {
+		t.Fatalf("target unmarshal: %v", err)
+	}
+	if targetPayload.Total == 0 {
+		t.Error("target=app1: no matches for 'app1:'")
+	}
+	for _, m := range targetPayload.Matches {
+		if strings.HasPrefix(m.Location.Path, "app2/") {
+			t.Errorf("target=app1 leaked app2 file %q", m.Location.Path)
+		}
+	}
+}
+
+// TestSearchSourceLimit: with limit=1 on a many-match pattern, exactly one
+// match returns and Truncated is set.
+func TestSearchSourceLimit(t *testing.T) {
+	client := startClient(t, fixtureHBR(t))
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "search_source"
+	req.Params.Arguments = map[string]any{
+		"pattern": "#include",
+		"limit":   float64(1),
+	}
+	res, err := client.CallTool(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("error: %s", textOf(t, res))
+	}
+	var payload herbmcp.SearchSourceResponse
+	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload.Total != 1 {
+		t.Errorf("Total = %d, want 1 under limit=1", payload.Total)
+	}
+	if !payload.Truncated {
+		t.Error("Truncated=false, want true under limit=1")
+	}
+}
+
+// TestSearchSourceContext: context=2 produces a snippet spanning ±2 lines
+// around the match, so total snippet lines is up to 5.
+func TestSearchSourceContext(t *testing.T) {
+	client := startClient(t, fixtureHBR(t))
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "search_source"
+	req.Params.Arguments = map[string]any{
+		"pattern":     "icf_add_one",
+		"path_prefix": "lib/icf_pair.c",
+		"context":     float64(2),
+	}
+	res, err := client.CallTool(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("error: %s", textOf(t, res))
+	}
+	var payload herbmcp.SearchSourceResponse
+	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload.Total == 0 {
+		t.Fatal("no matches for icf_add_one in lib/icf_pair.c")
+	}
+	// The definition at line 8 has plenty of surrounding lines, so
+	// EndLine-StartLine must be >= 2 with context=2 (would be 0 with
+	// default context=0).
+	m := payload.Matches[0]
+	if m.Location.Snippet == nil {
+		t.Fatal("snippet nil")
+	}
+	if m.Location.Snippet.EndLine-m.Location.Snippet.StartLine < 2 {
+		t.Errorf("snippet span = %d..%d, want >=2 lines of range with context=2",
+			m.Location.Snippet.StartLine, m.Location.Snippet.EndLine)
+	}
+}
+
+// TestSearchSourceNoMatch: a pattern that doesn't exist returns empty
+// matches without a tool error.
+func TestSearchSourceNoMatch(t *testing.T) {
+	client := startClient(t, fixtureHBR(t))
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "search_source"
+	req.Params.Arguments = map[string]any{"pattern": "__no_such_token_anywhere__"}
+	res, err := client.CallTool(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", textOf(t, res))
+	}
+	var payload herbmcp.SearchSourceResponse
+	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload.Total != 0 {
+		t.Errorf("Total = %d, want 0", payload.Total)
+	}
+	if payload.FilesScanned == 0 {
+		t.Error("FilesScanned = 0, expected non-zero (fixture has files)")
+	}
+}
+
+// TestSearchSourceIncludeExternal: default excludes /usr/include content;
+// include_external=true unions it in. Skips if the host lacks stdio.h.
+func TestSearchSourceIncludeExternal(t *testing.T) {
+	if _, err := os.Stat("/usr/include/stdio.h"); err != nil {
+		t.Skip("host lacks /usr/include/stdio.h; skipping include_external MCP test")
+	}
+	_, thisFile, _, _ := runtime.Caller(0)
+	repo := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	bdir := filepath.Join(repo, "testdata", "fixture", "builddir")
+	proot := filepath.Join(repo, "testdata", "fixture")
+	out := filepath.Join(t.TempDir(), "test.hbr")
+	if err := collectForTestWithGlobs(bdir, proot, out, []string{"/usr/include/**"}); err != nil {
+		t.Fatalf("collectForTestWithGlobs: %v", err)
+	}
+	client := startClient(t, out)
+
+	// Pattern that lives in /usr/include/stdio.h but not the fixture.
+	// 'FILE' shows up in stdio.h in many places; no fixture file uses it.
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "search_source"
+	req.Params.Arguments = map[string]any{
+		"pattern":     "FILE",
+		"path_prefix": "/usr/include/",
+	}
+	res, err := client.CallTool(context.Background(), req)
+	if err != nil {
+		t.Fatalf("default CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("default error: %s", textOf(t, res))
+	}
+	var def herbmcp.SearchSourceResponse
+	if err := json.Unmarshal([]byte(textOf(t, res)), &def); err != nil {
+		t.Fatalf("default unmarshal: %v", err)
+	}
+	if def.Total != 0 {
+		t.Errorf("default search matched external content (%d hits); expected 0 without include_external", def.Total)
+	}
+
+	req.Params.Arguments = map[string]any{
+		"pattern":          "FILE",
+		"path_prefix":      "/usr/include/",
+		"include_external": true,
+	}
+	res, err = client.CallTool(context.Background(), req)
+	if err != nil {
+		t.Fatalf("with-ext CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("with-ext error: %s", textOf(t, res))
+	}
+	var ext herbmcp.SearchSourceResponse
+	if err := json.Unmarshal([]byte(textOf(t, res)), &ext); err != nil {
+		t.Fatalf("with-ext unmarshal: %v", err)
+	}
+	if ext.Total == 0 {
+		t.Error("include_external=true matched 0 for FILE in /usr/include/; expected >0")
+	}
+}

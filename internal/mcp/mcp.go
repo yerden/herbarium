@@ -8,7 +8,8 @@
 //   schema_tool.go             describe_schema
 //   sql_tool.go                sql_query   (read-only escape hatch)
 //   source_tools.go            read_source, list_source_files,
-//                              verify_source, list_source_drift
+//                              verify_source, list_source_drift,
+//                              search_source
 //   target_tools.go            list_targets, describe_target
 //   symbol_tools.go            find_symbol, describe_symbol
 //   callgraph_source_tools.go  list_callers, list_callees, list_call_paths

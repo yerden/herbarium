@@ -59,12 +59,12 @@ Phase 7 (incremental re-ingest) is **deferred by user decision** — every colle
 
 ## MCP tools (Phase 6, landed)
 
-23 tools grouped by file under `internal/mcp/`. Every location-returning tool wraps its position in a uniform `Location{path, line?, column?, blob_hash, snippet?, absolute_path?}` shape (see `location.go`). Response payloads land as both `text` (JSON pretty-printed) and `StructuredContent` on the `CallToolResult` — an agent can consume either. Tool descriptions are the user-facing contract; edit them if behavior changes.
+27 tools grouped by file under `internal/mcp/`. Every location-returning tool wraps its position in a uniform `Location{path, line?, column?, blob_hash, snippet?, absolute_path?}` shape (see `location.go`). Response payloads land as both `text` (JSON pretty-printed) and `StructuredContent` on the `CallToolResult` — an agent can consume either. Tool descriptions are the user-facing contract; edit them if behavior changes.
 
 Groups:
 
 - **Escape hatches:** `describe_schema`, `sql_query`.
-- **Source:** `read_source`, `list_source_files`, `verify_source`, `list_source_drift`. The last two require `serve --project-root`.
+- **Source:** `read_source`, `list_source_files`, `verify_source`, `list_source_drift`, `search_source` (literal + RE2 grep across every indexed blob). The live-hash mode of `verify_source` and `list_source_drift` require `serve --project-root`.
 - **Targets:** `list_targets`, `describe_target`.
 - **Symbols:** `find_symbol` (FTS5 with prefix tokens), `describe_symbol` (multi-def + linkage_names + reachability + link_resolutions).
 - **Call graph, source view:** `list_callers`, `list_callees`, `list_call_paths` (in-memory DFS, cycle-in-path guard, max_depth cap).

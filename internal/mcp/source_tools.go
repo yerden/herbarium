@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -10,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -84,6 +86,44 @@ func (s *Server) registerSourceTools() {
 		mcp.WithString("path_prefix",
 			mcp.Description("Restrict to files whose project-relative path starts with this prefix.")),
 	), s.handleListSourceDrift)
+
+	s.mcp.AddTool(newTool("search_source",
+		mcp.WithDescription(
+			"Grep across every indexed source blob and return per-match Locations. "+
+				"Literal substring by default; set regex=true for RE2 syntax. Use this "+
+				"for content patterns that find_symbol misses — string literals, macro "+
+				"invocations, call-shape patterns like 'pthread_mutex_lock('. "+
+				"Filters match list_source_files (target, path_prefix, kind, "+
+				"include_external). Multiple matches on one line surface as separate "+
+				"entries, each with its column. Bounded by 'limit' (default 200, max "+
+				"2000); optional 'context' lines around each hit (default 0, max 20).",
+		),
+		mcp.WithString("pattern", mcp.Required(),
+			mcp.Description("Substring to find (byte-literal). If regex=true, an RE2 pattern instead — RE2 has no catastrophic backtrack so agents can trust it.")),
+		mcp.WithBoolean("regex",
+			mcp.Description("Treat 'pattern' as an RE2 regex."),
+			mcp.DefaultBool(false)),
+		mcp.WithString("path_prefix",
+			mcp.Description("Restrict to files whose path starts with this prefix. Applied to both project and external paths.")),
+		mcp.WithString("kind",
+			mcp.Description("'source' (.c/.C/.cpp/etc.), 'header' (.h/.hpp/.hxx), or 'generated' (is_generated=1)."),
+			mcp.Enum("source", "header", "generated")),
+		mcp.WithString("target",
+			mcp.Description("Restrict to files listed as sources of this target. Excludes generated_sources and external headers.")),
+		mcp.WithBoolean("include_external",
+			mcp.Description("If true, also search external_sources (--include-external headers)."),
+			mcp.DefaultBool(false)),
+		mcp.WithNumber("context",
+			mcp.Description("Lines of context to include on either side of each match (default 0 → single-line snippet)."),
+			mcp.Min(0),
+			mcp.Max(float64(searchSourceMaxContext)),
+			mcp.DefaultNumber(0)),
+		mcp.WithNumber("limit",
+			mcp.Description("Cap on returned matches; default 200, max 2000."),
+			mcp.Min(1),
+			mcp.Max(float64(searchSourceMaxLimit)),
+			mcp.DefaultNumber(searchSourceDefaultLimit)),
+	), s.handleSearchSource)
 }
 
 // -- read_source ------------------------------------------------------
@@ -497,6 +537,185 @@ func (s *Server) handleListSourceDrift(_ context.Context, req mcp.CallToolReques
 	// Stable ordering — nice for humans reading the raw MCP transcript.
 	sort.Slice(resp.Drifted, func(i, j int) bool { return resp.Drifted[i].Path < resp.Drifted[j].Path })
 	return jsonResult(resp)
+}
+
+// -- search_source ----------------------------------------------------
+
+const (
+	searchSourceDefaultLimit = 200
+	searchSourceMaxLimit     = 2000
+	searchSourceMaxContext   = 20
+)
+
+// SearchMatch is one hit in search_source. MatchText is the exact bytes
+// that matched (useful for regex captures — agents can see what fired).
+type SearchMatch struct {
+	Location  Location `json:"location"`
+	MatchText string   `json:"match_text,omitempty"`
+}
+
+// SearchSourceResponse is what search_source returns.
+type SearchSourceResponse struct {
+	Pattern      string        `json:"pattern"`
+	IsRegex      bool          `json:"regex,omitempty"`
+	Matches      []SearchMatch `json:"matches"`
+	Total        int           `json:"total"`
+	Truncated    bool          `json:"truncated"`
+	FilesScanned int           `json:"files_scanned"`
+}
+
+func (s *Server) handleSearchSource(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	pattern, err := req.RequireString("pattern")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if pattern == "" {
+		return mcp.NewToolResultError("search_source: pattern is empty"), nil
+	}
+	useRegex := req.GetBool("regex", false)
+	target := req.GetString("target", "")
+	prefix := req.GetString("path_prefix", "")
+	kind := strings.ToLower(req.GetString("kind", ""))
+	includeExternal := req.GetBool("include_external", false)
+	ctxLines := clampRange(req.GetInt("context", 0), 0, searchSourceMaxContext)
+	limit := clampRange(req.GetInt("limit", searchSourceDefaultLimit), 1, searchSourceMaxLimit)
+
+	var re *regexp.Regexp
+	patternBytes := []byte(pattern)
+	if useRegex {
+		re, err = regexp.Compile(pattern)
+		if err != nil {
+			return mcp.NewToolResultError("search_source: regex compile: " + err.Error()), nil
+		}
+	}
+
+	var wantedFiles map[string]bool
+	if target != "" {
+		f, err := s.filesForTarget(target)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		wantedFiles = f
+	}
+
+	resp := SearchSourceResponse{Pattern: pattern, IsRegex: useRegex}
+
+	// Iterate the three source tables in a stable order. Target filter
+	// short-circuits generated_sources and external_sources because those
+	// carry no target membership.
+	type src struct {
+		table, keyCol string
+		isGenerated   bool
+	}
+	tables := []src{{"sources", "path", false}}
+	if wantedFiles == nil {
+		tables = append(tables, src{"generated_sources", "builddir_rel", true})
+	}
+	if includeExternal && wantedFiles == nil {
+		tables = append(tables, src{"external_sources", "abs_path", false})
+	}
+
+	full := false
+	for _, t := range tables {
+		if full {
+			break
+		}
+		q := fmt.Sprintf(`SELECT %s, blob_hash FROM %s ORDER BY %s`, t.keyCol, t.table, t.keyCol)
+		rows, err := s.db.Query(q)
+		if err != nil {
+			return mcp.NewToolResultError("search_source: " + t.table + " query: " + err.Error()), nil
+		}
+		for rows.Next() {
+			var path, hash string
+			if err := rows.Scan(&path, &hash); err != nil {
+				rows.Close()
+				return mcp.NewToolResultError("search_source: " + t.table + " scan: " + err.Error()), nil
+			}
+			if prefix != "" && !strings.HasPrefix(path, prefix) {
+				continue
+			}
+			if wantedFiles != nil && !wantedFiles[path] {
+				continue
+			}
+			if !matchesKind(kind, path, t.isGenerated) {
+				continue
+			}
+			content, err := s.readBlob(hash)
+			if err != nil {
+				// A missing blob for one file shouldn't kill the whole
+				// scan — record no matches for it and keep going.
+				continue
+			}
+			resp.FilesScanned++
+			if s.searchInBlob(&resp, path, hash, content, patternBytes, re, ctxLines, limit) {
+				full = true
+				break
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return mcp.NewToolResultError("search_source: " + t.table + " iterate: " + err.Error()), nil
+		}
+		rows.Close()
+	}
+	resp.Total = len(resp.Matches)
+	resp.Truncated = full
+	return jsonResult(resp)
+}
+
+// searchInBlob scans one file's content and appends matches to resp
+// until limit is reached. Returns true when limit is hit so the caller
+// stops iterating files.
+func (s *Server) searchInBlob(resp *SearchSourceResponse, path, hash string, content, pattern []byte, re *regexp.Regexp, ctxLines, limit int) bool {
+	lines := bytes.Split(content, []byte{'\n'})
+	if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
+		lines = lines[:len(lines)-1]
+	}
+	for i, line := range lines {
+		lineNum := i + 1
+		if re != nil {
+			for _, h := range re.FindAllIndex(line, -1) {
+				resp.Matches = append(resp.Matches, s.buildSearchMatch(path, hash, lineNum, h[0]+1, line[h[0]:h[1]], content, ctxLines))
+				if len(resp.Matches) >= limit {
+					return true
+				}
+			}
+			continue
+		}
+		start := 0
+		for {
+			idx := bytes.Index(line[start:], pattern)
+			if idx < 0 {
+				break
+			}
+			col := start + idx + 1
+			resp.Matches = append(resp.Matches, s.buildSearchMatch(path, hash, lineNum, col, pattern, content, ctxLines))
+			if len(resp.Matches) >= limit {
+				return true
+			}
+			start = start + idx + len(pattern)
+		}
+	}
+	return false
+}
+
+func (s *Server) buildSearchMatch(path, hash string, line, col int, matchText, content []byte, ctxLines int) SearchMatch {
+	loc := Location{Path: path, Line: line, Column: col, BlobHash: hash}
+	if s.opts.ProjectRoot != "" && !filepath.IsAbs(path) {
+		loc.AbsolutePath = filepath.Join(s.opts.ProjectRoot, filepath.FromSlash(path))
+	}
+	loc.Snippet = extractSnippet(content, line, ctxLines)
+	return SearchMatch{Location: loc, MatchText: string(matchText)}
+}
+
+func clampRange(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // -- shared -----------------------------------------------------------
