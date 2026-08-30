@@ -495,7 +495,7 @@ When `herbarium serve` is launched with `--project-root <path>`, responses addit
 - Snippet extraction on demand from the blob store for every location-returning tool (±5 lines, uniform `Location` shape carrying `path`, `line`, `column`, `blob_hash`, `snippet`, and `absolute_path` when `--project-root` is set).
 - `--project-root` option on `serve` enables `verify_source` live-hashing and `list_source_drift`; adds `absolute_path` to responses. Without it, responses are self-contained against the .hbr.
 - `describe_schema` returns embedded schema + closed-vocabulary enum glossary + canonical join recipes; `sql_query` uses the read-only driver mode (`mode=ro + query_only(1)`) so writes are rejected at the SQLite layer with a "readonly" error rather than by application-side parsing.
-- Known gaps left for later work (documented in the tool descriptions themselves): `list_icf_groups` returns empty until the ingest side persists the parsed groups; `list_entry_points` doesn't yet classify constructor-attributed or `.init_array` entries; `resolve_indirect_call` still falls back to the full address-taken pool for sites where neither `DW_AT_call_target` nor a call-instruction relocation names a typed target (computed pointers, non-x86-64 objects).
+- Known gaps left for later work (documented in the tool descriptions themselves): `list_entry_points` doesn't yet classify constructor-attributed or `.init_array` entries; `resolve_indirect_call` still falls back to the full address-taken pool for sites where neither `DW_AT_call_target` nor a call-instruction relocation names a typed target (computed pointers, non-x86-64 objects).
 
 ### Phase 7 — Incremental re-ingest — **deferred**
 
@@ -622,7 +622,7 @@ Typedefs and record types are file-scoped even when declared in headers, because
 
 Struct or union field: `c:<path>@S@<struct>@F@<field>` (using the containing type's USR path, including for anonymous containers).
 
-Field-level USRs are populated only where a field participates in a join (`indirect_call_sites.field_hint`, and a future walker's `stored_in:T.f`). Elsewhere the field name is carried as a plain string alongside the containing type's USR.
+No table stores a field USR yet — `usr.Field` defines the form for a future walker's `stored_in:T.f`, but has no caller. `indirect_call_sites.field_hint` is deliberately *not* one: it is a human-readable `struct_t.field` (or a bare global / parameter name), because it is a hint for the reader rather than a join key — the join that matters there is `callee_type` against `symbols.signature`. Elsewhere a field name is carried as a plain string alongside the containing type's USR.
 
 ### Generated sources
 
