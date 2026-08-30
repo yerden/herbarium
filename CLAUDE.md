@@ -79,7 +79,8 @@ Documented in tool descriptions and in `herbarium-plan.md § Phase 6`:
 - `indirect_call_sites.callee_type` and `.field_hint` are always empty — Phase 3 parses the DIEs but doesn't yet walk `DW_AT_call_target` expressions. `resolve_indirect_call` falls back to the full address-taken pool when `callee_type` is empty.
 - `list_icf_groups` covers IPA-ICF only (from GCC's `.icf` dumps). Linker-level ICF (gold/lld `--icf=all`) is a separate pass and not tracked — if the linker folds further, this tool underreports.
 - `list_entry_points` covers `main` + externally-visible symbols. Constructor-attributed (`__attribute__((constructor))`) and `.init_array` entries are not classified — would need an additional DWARF pass.
-- `link_resolutions.losing_objects` is always `[]` — GNU ld's map file only records what was included. Would require `ar t` + per-member `nm` cross-referencing.
+- `link_resolutions.losing_objects` is derived from an nm scan across every .o in the builddir, so it lists "other .o's that also define this symbol" — broader than a strict map-file impl, which would list only candidates ld actually weighed. Archive members ld never pulled in still show up here.
+- `link_resolutions.winning_object` reflects the linker's actual choice when a `.map` file is present; without one, it is picked heuristically from the same nm scan (strong > weak > local, deterministic tie-break). Same-named statics in two TUs of the same target with no map file cannot be disambiguated by address alone and fall back to name lookup.
 - `symbol_reachability.section_kept` is always 1 — parsing "Discarded input sections" from the map file is future work.
 
 ## Fixture (Phase 8)
