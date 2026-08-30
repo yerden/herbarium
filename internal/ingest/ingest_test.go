@@ -339,7 +339,10 @@ func TestCompilerIngestFixture(t *testing.T) {
 			{"add_ints", "int (int, int)"},
 			{"hook", "int (int)"},
 			{"use_dispatch", "int (int, int)"},
-			{"never_called", "void ()"},
+			// Declared `void never_called(void)` — DW_AT_prototyped is
+			// set, so the empty list renders "(void)", not the "()" of a
+			// non-prototyped declaration.
+			{"never_called", "void (void)"},
 		} {
 			var got string
 			if err := db.QueryRow(

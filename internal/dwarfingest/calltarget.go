@@ -33,11 +33,24 @@ const (
 	opEntryValue = 0xa3 // DW_OP_entry_value <ULEB len> <expr>
 )
 
-// x86-64 SysV passes the first six integer/pointer arguments in
+// x86-64 SysV passes the first six INTEGER-class arguments in
 // rdi, rsi, rdx, rcx, r8, r9 — DWARF register numbers 5, 4, 1, 2, 8, 9.
-// DW_AT_call_target's DW_OP_entry_value(DW_OP_regN) therefore names the
-// Nth argument of the enclosing function.
+// The register's position in this list is a *register* ordinal, not a
+// source parameter index: an SSE-class argument (a double, say) takes
+// an xmm register and consumes nothing here, so the two only coincide
+// when every preceding parameter is INTEGER-class. intArgIndex replays
+// the assignment rather than indexing directly.
 var argRegOrder = []uint64{5, 4, 1, 2, 8, 9}
+
+// DW_ATE_* base-type encodings. debug/dwarf keeps its copies unexported.
+const (
+	encAddress      = 0x01
+	encBoolean      = 0x02
+	encSigned       = 0x05
+	encSignedChar   = 0x06
+	encUnsigned     = 0x07
+	encUnsignedChar = 0x08
+)
 
 // callTargetReloc is the relocation that supplies an indirect call's
 // target address.
@@ -144,32 +157,107 @@ func (ir *indirectResolver) resolveViaCallTarget(cs *CallSite) bool {
 	if !ok || cs.enclosingOff == 0 {
 		return false
 	}
-	argIdx := -1
-	for i, r := range argRegOrder {
-		if r == reg {
-			argIdx = i
-			break
-		}
-	}
-	if argIdx < 0 {
+	// A large aggregate return passes a hidden pointer in rdi, shifting
+	// every argument register by one. Rather than replicate the size
+	// classification, decline the whole shape.
+	if ir.isAggregate(ir.returnTypeOff(cs.enclosingOff)) {
 		return false
 	}
 
 	params := ir.formalParams(cs.enclosingOff)
-	if argIdx >= len(params) {
+	argIdx := ir.intArgIndex(params, reg)
+	if argIdx < 0 {
 		return false
 	}
-	p := params[argIdx]
-	sig, ok := ir.fnPtrSignature(p.typeOff)
+	sig, ok := ir.fnPtrSignature(params[argIdx].typeOff)
 	if !ok {
-		// The register-order mapping only holds when every preceding
-		// argument is register-passed. A non-fn-pointer here means the
-		// guess was wrong, so report nothing rather than something false.
 		return false
 	}
 	cs.CalleeType = sig
-	cs.FieldHint = p.name
+	cs.FieldHint = params[argIdx].name
 	return true
+}
+
+func (ir *indirectResolver) intArgIndex(params []formalParam, reg uint64) int {
+	classes := make([]bool, len(params))
+	for i, p := range params {
+		classes[i] = ir.isIntegerClass(p.typeOff)
+	}
+	return argIndexForReg(classes, reg)
+}
+
+// argIndexForReg replays the x86-64 SysV integer-register assignment
+// over a parameter list and returns the index of the parameter passed in
+// DWARF register reg, or -1 when the assignment cannot be replayed with
+// confidence.
+//
+// integerClass[i] reports whether parameter i occupies exactly one
+// integer argument register. The first parameter for which it is false —
+// a float, a by-value aggregate, an __int128, a vector — stops the walk:
+// past that point the register order no longer tracks the parameter
+// order, and a wrong answer here silently narrows resolve_indirect_call
+// to the wrong candidates. Reporting nothing is the safe failure.
+func argIndexForReg(integerClass []bool, reg uint64) int {
+	for i, isInt := range integerClass {
+		if !isInt || i >= len(argRegOrder) {
+			return -1
+		}
+		if argRegOrder[i] == reg {
+			return i
+		}
+	}
+	return -1
+}
+
+// isIntegerClass reports whether a type occupies exactly one integer
+// argument register under x86-64 SysV.
+func (ir *indirectResolver) isIntegerClass(off dwarf.Offset) bool {
+	_, e := ir.stripQualifiers(off)
+	if e == nil {
+		return false
+	}
+	switch e.Tag {
+	case dwarf.TagPointerType, dwarf.TagEnumerationType:
+		return true
+	case dwarf.TagBaseType:
+		enc, ok := e.Val(dwarf.AttrEncoding).(int64)
+		if !ok {
+			return false
+		}
+		switch enc {
+		case encAddress, encBoolean, encSigned, encSignedChar, encUnsigned, encUnsignedChar:
+			// __int128 is INTEGER-class but takes a register pair.
+			sz, ok := e.Val(dwarf.AttrByteSize).(int64)
+			return ok && sz <= 8
+		}
+	}
+	return false
+}
+
+func (ir *indirectResolver) isAggregate(off dwarf.Offset) bool {
+	if off == 0 {
+		return false
+	}
+	_, e := ir.stripQualifiers(off)
+	if e == nil {
+		return false
+	}
+	switch e.Tag {
+	case dwarf.TagStructType, dwarf.TagUnionType, dwarf.TagArrayType, dwarf.TagClassType:
+		return true
+	}
+	return false
+}
+
+func (ir *indirectResolver) returnTypeOff(spOff dwarf.Offset) dwarf.Offset {
+	r := ir.dw.Reader()
+	r.Seek(spOff)
+	e, err := r.Next()
+	if err != nil || e == nil {
+		return 0
+	}
+	off, _ := e.Val(dwarf.AttrType).(dwarf.Offset)
+	return off
 }
 
 // resolveViaReloc reads the relocation on the call instruction. On

@@ -124,13 +124,21 @@ func (tc *typeCache) renderSubroutineType(off dwarf.Offset, e *dwarf.Entry) stri
 	if _, err := r.Next(); err != nil {
 		return ret + " ()"
 	}
-	var params []string
+	params, variadic := tc.walkParams(r)
+	return ret + " " + paramList(params, variadic, prototyped(e))
+}
+
+// walkParams collects rendered parameter types from the children of the
+// entry the reader is positioned on, and reports whether the list ended
+// in DW_TAG_unspecified_parameters.
+func (tc *typeCache) walkParams(r *dwarf.Reader) (params []string, variadic bool) {
 	for {
 		c, err := r.Next()
 		if err != nil || c == nil || c.Tag == 0 {
-			break
+			return params, variadic
 		}
-		if c.Tag == dwarf.TagFormalParameter {
+		switch c.Tag {
+		case dwarf.TagFormalParameter:
 			p := ""
 			if pt, ok := c.Val(dwarf.AttrType).(dwarf.Offset); ok {
 				p = tc.render(pt)
@@ -139,56 +147,62 @@ func (tc *typeCache) renderSubroutineType(off dwarf.Offset, e *dwarf.Entry) stri
 				p = "?"
 			}
 			params = append(params, p)
+		case dwarf.TagUnspecifiedParameters:
+			variadic = true
 		}
 		if c.Children {
 			r.SkipChildren()
 		}
 	}
-	// Rendered exactly as buildSignature renders a subprogram, so a
-	// fn-pointer's callee_type joins symbols.signature directly.
-	if len(params) == 0 {
-		return ret + " (void)"
+}
+
+func prototyped(e *dwarf.Entry) bool {
+	p, _ := e.Val(dwarf.AttrPrototyped).(bool)
+	return p
+}
+
+// paramList renders the parenthesized parameter list. C distinguishes
+// three empty-ish forms and DWARF records the difference, so keep them
+// apart: "(void)" takes no arguments, "()" is a non-prototyped
+// declaration that takes unchecked default-promoted ones, and "(...)"
+// is neither. Collapsing them would let callee_type match — or fail to
+// match — signatures that are not actually compatible.
+func paramList(params []string, variadic, proto bool) string {
+	switch {
+	case len(params) == 0 && !proto:
+		// DW_TAG_unspecified_parameters means "..." only on a prototyped
+		// entry. Without DW_AT_prototyped it marks the K&R form, whose
+		// argument list is unknown rather than variadic — and "(...)"
+		// isn't valid C anyway.
+		return "()"
+	case len(params) == 0 && variadic:
+		return "(...)"
+	case len(params) == 0:
+		return "(void)"
+	case variadic:
+		return "(" + strings.Join(params, ", ") + ", ...)"
+	default:
+		return "(" + strings.Join(params, ", ") + ")"
 	}
-	return ret + " (" + strings.Join(params, ", ") + ")"
 }
 
 // buildSignature walks a DW_TAG_subprogram DIE and formats its
-// signature as "returnType (param1, param2, ...)". Uses the same
-// rendering rules as fn-pointer types so the two match.
+// signature as "returnType (param1, param2, ...)". Shares walkParams and
+// paramList with renderSubroutineType so a symbol's signature and a
+// fn-pointer's callee_type render identically and can be joined on.
 func buildSignature(tc *typeCache, e *dwarf.Entry) string {
 	ret := "void"
 	if to, ok := e.Val(dwarf.AttrType).(dwarf.Offset); ok {
 		ret = tc.render(to)
 	}
 	if !e.Children {
-		return ret + " ()"
+		return ret + " " + paramList(nil, false, prototyped(e))
 	}
 	r := tc.dw.Reader()
 	r.Seek(e.Offset)
 	if _, err := r.Next(); err != nil {
 		return ret + " ()"
 	}
-	var params []string
-	for {
-		c, err := r.Next()
-		if err != nil || c == nil || c.Tag == 0 {
-			break
-		}
-		if c.Tag == dwarf.TagFormalParameter {
-			p := ""
-			if pt, ok := c.Val(dwarf.AttrType).(dwarf.Offset); ok {
-				p = tc.render(pt)
-			}
-			if p == "" {
-				p = "?"
-			}
-			params = append(params, p)
-		} else if c.Children {
-			r.SkipChildren()
-		}
-	}
-	if len(params) == 0 {
-		return ret + " (void)"
-	}
-	return ret + " (" + strings.Join(params, ", ") + ")"
+	params, variadic := tc.walkParams(r)
+	return ret + " " + paramList(params, variadic, prototyped(e))
 }
