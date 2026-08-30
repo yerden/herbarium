@@ -144,8 +144,10 @@ func (tc *typeCache) renderSubroutineType(off dwarf.Offset, e *dwarf.Entry) stri
 			r.SkipChildren()
 		}
 	}
+	// Rendered exactly as buildSignature renders a subprogram, so a
+	// fn-pointer's callee_type joins symbols.signature directly.
 	if len(params) == 0 {
-		return ret + " ()"
+		return ret + " (void)"
 	}
 	return ret + " (" + strings.Join(params, ", ") + ")"
 }

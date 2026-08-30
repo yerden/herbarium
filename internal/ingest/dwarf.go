@@ -19,7 +19,8 @@ import (
 //   - symbol_definitions.decl_file / decl_line ← from DWARF's decl_file
 //     attribute on the declaration entries (typically the header)
 //   - indirect_call_sites ← DW_TAG_call_site without DW_AT_call_origin,
-//     with file/line/column resolved via the CU's line table
+//     with file/line/column resolved via the CU's line table, plus the
+//     callee_type/field_hint dwarfingest recovered for the site
 //
 // Runs AFTER Compiler pass — depends on the symbol/definition rows the
 // Compiler pass populated.
@@ -47,7 +48,7 @@ func DWARF(db *sql.DB, bd *builddir.BuildDir, pr *PathResolver, idByUSR map[stri
 	indirectStmt, err := tx.Prepare(`
 		INSERT INTO indirect_call_sites
 		  (caller_id, file, line, column, callee_type, field_hint)
-		VALUES (?, ?, ?, ?, '', '')`)
+		VALUES (?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return DwarfSummary{}, fmt.Errorf("ingest/dwarf: prepare indirect insert: %w", err)
 	}
@@ -108,7 +109,7 @@ func DWARF(db *sql.DB, bd *builddir.BuildDir, pr *PathResolver, idByUSR map[stri
 				continue
 			}
 			fileRel := pr.ToProjectRelative(cs.File).Rel
-			if _, err := indirectStmt.Exec(callerID, fileRel, cs.Line, cs.Column); err != nil {
+			if _, err := indirectStmt.Exec(callerID, fileRel, cs.Line, cs.Column, cs.CalleeType, cs.FieldHint); err != nil {
 				return DwarfSummary{}, fmt.Errorf("ingest/dwarf: indirect insert: %w", err)
 			}
 			sum.IndirectSites++

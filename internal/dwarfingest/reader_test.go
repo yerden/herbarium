@@ -118,6 +118,23 @@ func TestReadApp1Main(t *testing.T) {
 		t.Errorf("indirect call sites attributed to use_dispatch = %d, want ≥2\nall sites: %+v",
 			indirectSites, info.CallSites)
 	}
+
+	// Both sites dispatch through g_ops. GCC emits no DW_AT_call_target
+	// for them (the loaded pointer is dead by the return PC), so the
+	// member comes from the call instruction's R_X86_64_PC32 relocation
+	// against g_ops plus the struct's member offsets.
+	targets := map[string]string{} // field_hint → callee_type
+	for _, cs := range info.CallSites {
+		if cs.Indirect && cs.FieldHint != "" {
+			targets[cs.FieldHint] = cs.CalleeType
+		}
+	}
+	for _, want := range []string{"ops.add", "ops.mul"} {
+		if targets[want] != "int (int, int)" {
+			t.Errorf("field_hint %q → callee_type %q, want %q\nall: %v",
+				want, targets[want], "int (int, int)", targets)
+		}
+	}
 }
 
 func TestReadLibDispatchImpls(t *testing.T) {

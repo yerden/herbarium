@@ -5,6 +5,7 @@ import (
 	"debug/elf"
 	"fmt"
 	"path/filepath"
+	"slices"
 )
 
 // Read opens an ELF object and returns the DWARF facts herbarium needs.
@@ -26,10 +27,14 @@ func Read(path string) (*Info, error) {
 
 	r := dw.Reader()
 	var (
-		curCUFiles  []*dwarf.LineFile
-		curLR       *dwarf.LineReader
-		stack       []frame
+		curCUFiles []*dwarf.LineFile
+		curLR      *dwarf.LineReader
+		stack      []frame
 	)
+	// Type offsets of every CU-scope variable, keyed by name — the
+	// relocation route in calltarget.go joins a table symbol back to
+	// its DWARF type through this.
+	varTypes := map[string]dwarf.Offset{}
 
 	for {
 		e, err := r.Next()
@@ -80,6 +85,13 @@ func Read(path string) (*Info, error) {
 			}
 
 		case dwarf.TagVariable:
+			if len(stack) <= 1 {
+				if n, ok := e.Val(dwarf.AttrName).(string); ok && n != "" {
+					if off, ok := e.Val(dwarf.AttrType).(dwarf.Offset); ok {
+						varTypes[n] = off
+					}
+				}
+			}
 			v := parseVariable(e, curCUFiles, tc)
 			// Only CU-scope variables — nested locals would flood the DB.
 			if v.Name != "" && v.DeclFile != "" && len(stack) <= 1 {
@@ -92,6 +104,17 @@ func Read(path string) (*Info, error) {
 		}
 	}
 
+	// Building the resolver's indexes costs a pass over the object's
+	// symbol and relocation tables, so skip it when nothing needs them.
+	if slices.ContainsFunc(info.CallSites, func(cs CallSite) bool { return cs.Indirect }) {
+		ir := newIndirectResolver(f, dw, tc, varTypes)
+		for i := range info.CallSites {
+			if info.CallSites[i].Indirect {
+				ir.resolve(&info.CallSites[i])
+			}
+		}
+	}
+
 	return info, nil
 }
 
@@ -99,10 +122,11 @@ type frame struct {
 	tag             dwarf.Tag
 	subprogramName  string
 	inlinedFromName string
+	offset          dwarf.Offset
 }
 
 func newFrame(e *dwarf.Entry, dw *dwarf.Data) frame {
-	f := frame{tag: e.Tag}
+	f := frame{tag: e.Tag, offset: e.Offset}
 	switch e.Tag {
 	case dwarf.TagSubprogram:
 		if n, ok := e.Val(dwarf.AttrName).(string); ok {
@@ -171,9 +195,14 @@ func parseCallSite(e *dwarf.Entry, files []*dwarf.LineFile, lr *dwarf.LineReader
 		cs.Column = int(col)
 	}
 
+	if pc, ok := e.Val(dwarf.AttrCallReturnPC).(uint64); ok {
+		cs.returnPC = pc
+	}
+	cs.callTarget, _ = e.Val(dwarf.AttrCallTarget).([]byte)
+
 	// Fallback: resolve via line table using CallReturnPC.
 	if (cs.File == "" || cs.Line == 0) && lr != nil {
-		if pc, ok := e.Val(dwarf.AttrCallReturnPC).(uint64); ok && pc > 0 {
+		if pc := cs.returnPC; pc > 0 {
 			// Use pc-1: return_pc is the byte AFTER the call, whose
 			// line entry is "the statement after the call". pc-1 is
 			// inside the call instruction and maps to its source line.
@@ -192,6 +221,7 @@ func parseCallSite(e *dwarf.Entry, files []*dwarf.LineFile, lr *dwarf.LineReader
 		if f.tag == dwarf.TagSubprogram {
 			if cs.EnclosingName == "" {
 				cs.EnclosingName = f.subprogramName
+				cs.enclosingOff = f.offset
 			}
 			if cs.SourceCallerName == "" {
 				cs.SourceCallerName = f.subprogramName

@@ -30,6 +30,9 @@ func TestListIndirectCallSites(t *testing.T) {
 	if payload.Total != 2 {
 		t.Errorf("Total = %d, want 2", payload.Total)
 	}
+	// Both dispatch through const struct ops g_ops, so DWARF plus the
+	// call instruction's relocation pin the exact member.
+	hints := map[string]string{}
 	for _, site := range payload.Sites {
 		if site.Caller.Name != "use_dispatch" {
 			t.Errorf("caller = %q, want use_dispatch", site.Caller.Name)
@@ -37,6 +40,33 @@ func TestListIndirectCallSites(t *testing.T) {
 		if site.Location.Path != "app1/main.c" {
 			t.Errorf("location.path = %q, want app1/main.c", site.Location.Path)
 		}
+		if site.CalleeType != "int (int, int)" {
+			t.Errorf("callee_type = %q, want %q", site.CalleeType, "int (int, int)")
+		}
+		hints[site.FieldHint] = site.Location.Path
+	}
+	for _, want := range []string{"ops.add", "ops.mul"} {
+		if _, ok := hints[want]; !ok {
+			t.Errorf("no site with field_hint %q; got %v", want, hints)
+		}
+	}
+}
+
+func TestListIndirectCallSitesTypeFilter(t *testing.T) {
+	client := startClient(t, fixtureHBR(t))
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "list_indirect_call_sites"
+	req.Params.Arguments = map[string]any{"callee_type": "int (int, int)"}
+	res, err := client.CallTool(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	var payload herbmcp.ListIndirectCallSitesResponse
+	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload.Total != 2 {
+		t.Errorf("Total = %d, want 2", payload.Total)
 	}
 }
 
@@ -139,20 +169,28 @@ func TestResolveIndirectCall(t *testing.T) {
 	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	// With empty callee_type (current ingest state), candidates fall
-	// back to every address-taken function. Both add_ints and mul_ints
-	// should appear tagged 'address_taken'.
+	// callee_type is known for this site, so candidates narrow to the
+	// address-taken functions with a matching signature — not the whole
+	// address-taken pool.
+	if payload.CalleeType != "int (int, int)" {
+		t.Fatalf("callee_type = %q, want %q", payload.CalleeType, "int (int, int)")
+	}
 	names := map[string]string{}
 	for _, c := range payload.Candidates {
 		names[c.Symbol.Name] = c.Evidence
 	}
 	for _, want := range []string{"add_ints", "mul_ints"} {
-		if _, ok := names[want]; !ok {
-			t.Errorf("resolve missing candidate %q", want)
+		if names[want] != "type_match" {
+			t.Errorf("candidate %q evidence = %q, want type_match", want, names[want])
 		}
 	}
-	if payload.Total < 2 {
-		t.Errorf("Total = %d, want ≥2", payload.Total)
+	for name, ev := range names {
+		if ev == "address_taken" {
+			t.Errorf("candidate %q fell back to the untyped pool", name)
+		}
+	}
+	if payload.Total != 2 {
+		t.Errorf("Total = %d, want 2 (add_ints, mul_ints); got %v", payload.Total, names)
 	}
 }
 

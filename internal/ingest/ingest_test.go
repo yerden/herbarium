@@ -280,7 +280,8 @@ func TestCompilerIngestFixture(t *testing.T) {
 		// inlined into main at codegen time, DWARF's inlined-subroutine
 		// chain lets us attribute the sites back to their source caller.
 		rows, err := db.Query(`
-			SELECT ics.file, ics.line, ics.column FROM indirect_call_sites ics
+			SELECT ics.file, ics.line, ics.column, ics.callee_type, ics.field_hint
+			FROM indirect_call_sites ics
 			JOIN symbols s ON ics.caller_id = s.id
 			WHERE s.name = 'use_dispatch'
 			ORDER BY ics.line
@@ -290,13 +291,15 @@ func TestCompilerIngestFixture(t *testing.T) {
 		}
 		defer rows.Close()
 		var got [][3]any
+		var typesAndHints [][2]string
 		for rows.Next() {
-			var f string
+			var f, calleeType, fieldHint string
 			var line, col int
-			if err := rows.Scan(&f, &line, &col); err != nil {
+			if err := rows.Scan(&f, &line, &col, &calleeType, &fieldHint); err != nil {
 				t.Fatalf("scan: %v", err)
 			}
 			got = append(got, [3]any{f, line, col})
+			typesAndHints = append(typesAndHints, [2]string{calleeType, fieldHint})
 		}
 		if err := rows.Err(); err != nil {
 			t.Fatalf("iter: %v", err)
@@ -311,6 +314,17 @@ func TestCompilerIngestFixture(t *testing.T) {
 		for i := range want {
 			if got[i] != want[i] {
 				t.Errorf("indirect site[%d] = %v, want %v", i, got[i], want[i])
+			}
+		}
+		// callee_type is rendered like symbols.signature so
+		// resolve_indirect_call can narrow by equality join.
+		wantTH := [][2]string{
+			{"int (int, int)", "ops.add"},
+			{"int (int, int)", "ops.mul"},
+		}
+		for i := range wantTH {
+			if typesAndHints[i] != wantTH[i] {
+				t.Errorf("indirect site[%d] type/hint = %v, want %v", i, typesAndHints[i], wantTH[i])
 			}
 		}
 	})
@@ -419,9 +433,9 @@ func TestPathResolver(t *testing.T) {
 	}
 
 	cases := []struct {
-		in       string
-		wantRel  string
-		inProj   bool
+		in      string
+		wantRel string
+		inProj  bool
 	}{
 		{"../src/main.c", "src/main.c", true},
 		{"/home/x/proj/src/main.c", "src/main.c", true},

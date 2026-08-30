@@ -117,8 +117,13 @@ CREATE TABLE indirect_call_sites (
   file        TEXT,
   line        INTEGER,
   column      INTEGER,          -- when available from DWARF
-  callee_type TEXT,             -- canonical fn-ptr type from DWARF
-  field_hint  TEXT              -- 'struct_t.field' when DWARF resolves it, else ''
+  -- callee_type is the callee's signature rendered like symbols.signature
+  -- ("int (int, int)"), so the two join by equality. field_hint names what
+  -- the call dispatches through: 'struct_t.field', a global fn-ptr's name,
+  -- or a fn-pointer parameter's name. Both are '' when the compiler left
+  -- no trace of the target (see internal/dwarfingest/calltarget.go).
+  callee_type TEXT,
+  field_hint  TEXT
 );
 CREATE INDEX idx_ics_caller ON indirect_call_sites(caller_id);
 CREATE INDEX idx_ics_type   ON indirect_call_sites(callee_type);
