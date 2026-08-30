@@ -57,6 +57,13 @@ func TestArgIndexForReg(t *testing.T) {
 		{"leading SSE arg", []bool{o, i, i, i}, 4, -1},
 		{"aggregate mid-list", []bool{i, o, i}, 1, -1},
 		{"register not in list", []bool{i}, 4, -1},
+		// argIndexForReg reads its register argument as an x86-64 DWARF
+		// number and cannot tell otherwise: AArch64's x1 (the second
+		// argument) is DWARF register 1, which is rdx's slot here, so
+		// this returns the *third* parameter. Nothing in this function
+		// can detect that — resolve's sysvAMD64 gate is what keeps it
+		// from ever being called off x86-64. See TestResolveOffX86.
+		{"aarch64 x1 aliases rdx's slot", []bool{i, i, i}, 1, 2},
 		{"past the six integer regs", []bool{i, i, i, i, i, i, i}, 99, -1},
 		{"no params", nil, 5, -1},
 	}
@@ -103,5 +110,25 @@ func TestDecodeRegExpr(t *testing.T) {
 				t.Errorf("decodeRegExpr(%v) = %d, %v; want %d, %v", tc.expr, got, ok, tc.want, tc.ok)
 			}
 		})
+	}
+}
+
+// A non-x86-64 object must leave both columns empty. argRegOrder and the
+// return_pc-4 relocation rule are both x86-64 ABI facts; applied to
+// another architecture's DWARF register numbering they don't fail, they
+// quietly name the wrong parameter.
+func TestResolveOffX86(t *testing.T) {
+	ir := &indirectResolver{} // sysvAMD64 false, as for any non-x86-64 ELF
+	cs := CallSite{
+		Indirect:      true,
+		EnclosingName: "f",
+		returnPC:      0x22,
+		// DW_OP_entry_value(DW_OP_reg1): rdx on x86-64, x1 on AArch64.
+		callTarget: []byte{0xa3, 0x01, 0x51},
+	}
+	ir.resolve(&cs)
+	if cs.CalleeType != "" || cs.FieldHint != "" {
+		t.Errorf("resolve off x86-64 set callee_type=%q field_hint=%q, want both empty",
+			cs.CalleeType, cs.FieldHint)
 	}
 }
