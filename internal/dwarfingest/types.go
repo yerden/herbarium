@@ -10,11 +10,13 @@
 // so DWARF facts can UPSERT symbols and symbol_definitions rows.
 package dwarfingest
 
+import "debug/dwarf"
+
 // Info is the top-level result of reading one .o's DWARF.
 type Info struct {
-	ObjectPath string
-	CompDir    string   // DW_AT_comp_dir on the CU
-	CUFile     string   // DW_AT_name on the CU — the .c source being compiled
+	ObjectPath  string
+	CompDir     string // DW_AT_comp_dir on the CU
+	CUFile      string // DW_AT_name on the CU — the .c source being compiled
 	Subprograms []Subprogram
 	CallSites   []CallSite
 	Structs     []StructInfo
@@ -27,15 +29,15 @@ type Info struct {
 // for the same name; the ingest layer picks the def to enrich symbol
 // rows.
 type Subprogram struct {
-	Name       string
+	Name        string
 	LinkageName string // DW_AT_linkage_name when present (usually the same as Name in C)
-	DeclFile   string // resolved via the CU's file table
-	DeclLine   int
-	DeclColumn int
-	Signature  string  // reconstructed: "returnType (param1, param2, ...)"
-	Definition bool    // has DW_AT_low_pc — a real def
+	DeclFile    string // resolved via the CU's file table
+	DeclLine    int
+	DeclColumn  int
+	Signature   string // reconstructed: "returnType (param1, param2, ...)"
+	Definition  bool   // has DW_AT_low_pc — a real def
 	Declaration bool   // DW_AT_declaration=1 — a decl only
-	External   bool    // DW_AT_external=1
+	External    bool   // DW_AT_external=1
 }
 
 // CallSite is one DW_TAG_call_site DIE. GCC emits these under the
@@ -47,11 +49,29 @@ type CallSite struct {
 	// inlined-subroutine chain. When a call comes from code inlined out
 	// of function F into G, EnclosingName is G but SourceCallerName is F.
 	SourceCallerName string
-	File     string
-	Line     int
-	Column   int
-	Indirect bool   // no DW_AT_call_origin — GCC couldn't resolve statically
-	CalleeName string // when DW_AT_call_origin resolves to a named DIE
+	File             string
+	Line             int
+	Column           int
+	Indirect         bool   // no DW_AT_call_origin — GCC couldn't resolve statically
+	CalleeName       string // when DW_AT_call_origin resolves to a named DIE
+
+	// CalleeType is the callee's signature, rendered the same way
+	// Subprogram.Signature is ("int (int, int)"), so the two join
+	// directly. It is the pointee of the function-pointer the call
+	// goes through, not the pointer type itself. Empty when neither
+	// DW_AT_call_target nor the call instruction's relocation names
+	// something typed.
+	CalleeType string
+	// FieldHint names what the call dispatches through: "ops.add" for
+	// a struct member, "g_hook" for a plain global fn-ptr, or a
+	// parameter name when DW_AT_call_target points at one.
+	FieldHint string
+
+	// Inputs for the second resolution phase (see calltarget.go);
+	// unexported because they are meaningless once Read returns.
+	returnPC     uint64
+	callTarget   []byte       // raw DW_AT_call_target expression
+	enclosingOff dwarf.Offset // DIE offset of the physically enclosing subprogram
 }
 
 // StructInfo is one DW_TAG_structure_type DIE. Anonymous structs get

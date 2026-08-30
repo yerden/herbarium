@@ -158,6 +158,26 @@ func TestE2EFixtureContract(t *testing.T) {
 		if resp.Total != 2 {
 			t.Errorf("indirect sites under use_dispatch = %d, want 2", resp.Total)
 		}
+		for _, site := range resp.Sites {
+			if site.CalleeType != "int (int, int)" || site.FieldHint == "" {
+				t.Errorf("site %d: callee_type=%q field_hint=%q, want the g_ops member resolved",
+					site.SiteID, site.CalleeType, site.FieldHint)
+				continue
+			}
+			// A resolved callee_type must narrow the candidate list to
+			// the two dispatch_impls.c functions, not the whole
+			// address-taken pool.
+			var res herbmcp.ResolveIndirectCallResponse
+			call(t, client, ctx, "resolve_indirect_call", map[string]any{"site_id": site.SiteID}, &res)
+			names := map[string]string{}
+			for _, c := range res.Candidates {
+				names[c.Symbol.Name] = c.Evidence
+			}
+			if len(names) != 2 || names["add_ints"] != "type_match" || names["mul_ints"] != "type_match" {
+				t.Errorf("resolve_indirect_call(%d) candidates = %v, want add_ints+mul_ints via type_match",
+					site.SiteID, names)
+			}
+		}
 	}
 
 	// --- Per-target link resolution: hook in app1 (strong) vs app2 (weak) ---

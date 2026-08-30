@@ -13,25 +13,26 @@ const indirectSitesLimit = 500
 
 // registerIndirectTools wires the indirect-call tools.
 //
-// Note: on the current ingest pipeline, indirect_call_sites.callee_type
-// and .field_hint are always empty (see herbarium-plan.md § Phase 3,
-// deferred until a workflow needs them). The MCP tools still expose
-// them so downstream code doesn't need to change when the DWARF pass
-// starts populating them.
+// callee_type is rendered in the same form as symbols.signature
+// ("int (int, int)" — the pointee of the function pointer, not the
+// pointer type), which is what lets resolve_indirect_call narrow by an
+// equality join instead of a string transform.
 func (s *Server) registerIndirectTools() {
 	s.mcp.AddTool(newTool("list_indirect_call_sites",
 		mcp.WithDescription(
-			"Sites GCC recorded as indirect calls, with source location, callee "+
-				"function-pointer type (when DWARF resolves it), and struct-field hint "+
-				"(when DWARF resolves that). Filterable by caller USR, callee_type, or "+
-				"target. Feed a site_id into resolve_indirect_call to get a candidate "+
-				"callee list combining devirt hints and type-compatible address-taken "+
-				"functions.",
+			"Sites GCC recorded as indirect calls, with source location, the "+
+				"callee's signature, and a hint naming what the call dispatches "+
+				"through ('ops.add' for a struct member, a bare name for a global "+
+				"fn-pointer or a fn-pointer parameter). Both are recovered from "+
+				"DWARF and are empty when the compiler kept no trace of the target. "+
+				"Filterable by caller USR, callee_type, or target. Feed a site_id "+
+				"into resolve_indirect_call to get a candidate callee list combining "+
+				"devirt hints and type-compatible address-taken functions.",
 		),
 		mcp.WithString("caller_usr",
 			mcp.Description("USR of the enclosing function (from find_symbol.hits[].usr or describe_symbol.usr). Omit for all sites.")),
 		mcp.WithString("callee_type",
-			mcp.Description("Filter by canonical fn-pointer type. Copy an existing value from list_indirect_call_sites output's callee_type column — the field is populated by DWARF and often empty on the current pipeline.")),
+			mcp.Description("Filter by callee signature, e.g. 'int (int, int)'. Same form as describe_symbol.signature, so a value from either tool matches here.")),
 		mcp.WithString("target",
 			mcp.Description("Restrict to sites whose caller is reachable in this target.")),
 	), s.handleListIndirectCallSites)
@@ -51,9 +52,12 @@ func (s *Server) registerIndirectTools() {
 	s.mcp.AddTool(newTool("resolve_indirect_call",
 		mcp.WithDescription(
 			"Best-effort candidate list for one indirect callsite. Combines: "+
-				"(a) GCC devirtualization hints, (b) type-compatible address-taken "+
-				"functions when callee_type is known. Each candidate is tagged with "+
-				"its evidence source.",
+				"(a) GCC devirtualization hints, (b) address-taken functions whose "+
+				"signature matches the site's callee_type. When DWARF left no "+
+				"callee_type for the site, falls back to every address-taken "+
+				"function — much broader. Each candidate is tagged with its "+
+				"evidence source, so the fallback is distinguishable ('address_taken' "+
+				"vs 'type_match').",
 		),
 		mcp.WithNumber("site_id", mcp.Required(),
 			mcp.Description("indirect_call_sites.id — from list_indirect_call_sites.")),

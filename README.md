@@ -96,7 +96,7 @@ Tool descriptions in [`internal/mcp/`](internal/mcp/) are the user-facing contra
 
 ## Known limitations
 
-- `indirect_call_sites.callee_type` / `.field_hint` are always empty — DIEs are parsed but `DW_AT_call_target` isn't yet walked.
+- `indirect_call_sites.callee_type` / `.field_hint` are resolved from `DW_AT_call_target` or, where GCC emits none, from the call instruction's relocation — the latter is x86-64-only. Sites that dispatch through a computed pointer still resolve to nothing, and `resolve_indirect_call` falls back to the full address-taken pool there.
 - `list_icf_groups` covers IPA-ICF only (from GCC's `.icf` dumps). Linker-level ICF (`gold`/`lld --icf=all`) is not tracked.
 - `list_entry_points` covers `main` + externally-visible symbols only. `__attribute__((constructor))` and `.init_array` entries aren't classified.
 - `link_resolutions.losing_objects` is broader than a strict map-file impl: nm sees every .o on disk, including archive members ld never pulled in. Read it as "other .o's that also define this symbol", not "candidates ld weighed and rejected".

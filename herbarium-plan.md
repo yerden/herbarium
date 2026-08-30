@@ -261,8 +261,8 @@ CREATE TABLE indirect_call_sites (
   file TEXT,
   line INTEGER,
   column INTEGER,          -- when available from DWARF
-  callee_type TEXT,        -- canonical fn-ptr type from DWARF
-  field_hint TEXT          -- 'struct_t.field' when DWARF resolves it, else ''
+  callee_type TEXT,        -- callee signature from DWARF, rendered like symbols.signature
+  field_hint TEXT          -- 'struct_t.field' / global / param name, else ''
 );
 CREATE INDEX idx_ics_caller ON indirect_call_sites(caller_id);
 CREATE INDEX idx_ics_type ON indirect_call_sites(callee_type);
@@ -463,7 +463,8 @@ When `herbarium serve` is launched with `--project-root <path>`, responses addit
 - Populate `symbols.signature` and `symbol_definitions.decl_file/decl_line` (UPSERT — Phase 2 already inserted the identity row; Phase 3 enriches). Owns `indirect_call_sites` insertion with `file`/`line`/`column` resolved via `LineReader.SeekPC(call_return_pc-1)` — GCC 16 puts `DW_AT_call_file/line/column` on the enclosing `DW_TAG_inlined_subroutine`, not on the `DW_TAG_call_site`.
 - Struct field DIEs are parsed (name + rendered type per member) but not persisted — the plan schema has no fields table currently. Add one when a downstream tool needs to query by struct field.
 - Typedef DIEs are captured with their target type as a rendered string; no full canonicalization to underlying base types (a `size_t` stays `size_t` rather than becoming `unsigned long`).
-- `indirect_call_sites.field_hint` stays empty for now. Populating it requires parsing `DW_AT_call_target` DWARF expressions (`DW_OP_addr(g_ops) + DW_OP_plus_uconst(offset)`) to name the containing struct + field. Deferred until an MCP tool workflow needs it.
+- Signature rendering keeps C's three empty-ish parameter lists apart, since `callee_type` is matched against `symbols.signature` by equality: `(void)` for a prototyped no-argument function, `()` for a non-prototyped declaration (`DW_TAG_unspecified_parameters` without `DW_AT_prototyped`, whose arguments are unchecked and default-promoted), and a trailing `, ...` for a genuine variadic. `symbols.signature` and a fn-pointer's rendering share one code path so the two always agree.
+- `internal/dwarfingest/calltarget.go` resolves `indirect_call_sites.callee_type` and `.field_hint` from two sources, because GCC emits only one of them per site. Where the callee address is still describable at the return PC — a call through a function-pointer *parameter* — GCC emits `DW_AT_call_target`; the decoder handles its register forms (`DW_OP_reg*`, `DW_OP_regx`, and the `DW_OP_entry_value` wrapper) and maps the register back to a formal parameter by *replaying* the x86-64 SysV integer-register assignment. The register's ordinal is not a parameter index — an SSE-class argument consumes no integer register, so `long f(double, unary, binary, long)` puts `second` in `rsi` where naive indexing would name `first` — so the replay stops at the first parameter that isn't a single-integer-register type and the site resolves to nothing. A large aggregate return (hidden `sret` pointer in `rdi`) declines the whole shape for the same reason. Where it doesn't — the dispatch-table shape `g_ops.add(...)`, whose loaded pointer is dead by the return PC — there is no `DW_AT_call_target` at all, so the resolver reads the call instruction's relocation instead: on x86-64 `call *disp(%rip)` ends with the 4-byte displacement, so the `R_X86_64_PC32` entry sits at `return_pc-4` and `addend+4` is the exact byte offset into the table symbol, which the struct's `DW_AT_data_member_location` turns into a member. Both routes end at a type DIE, rendered in `symbols.signature` form so `callee_type` joins by equality. The relocation route is x86-64-only and self-checks: anything that doesn't bottom out at a pointer-to-subroutine leaves both columns empty rather than guessing.
 
 ### Phase 4 — Link-plane ingest (~4 days)
 
@@ -494,7 +495,7 @@ When `herbarium serve` is launched with `--project-root <path>`, responses addit
 - Snippet extraction on demand from the blob store for every location-returning tool (±5 lines, uniform `Location` shape carrying `path`, `line`, `column`, `blob_hash`, `snippet`, and `absolute_path` when `--project-root` is set).
 - `--project-root` option on `serve` enables `verify_source` live-hashing and `list_source_drift`; adds `absolute_path` to responses. Without it, responses are self-contained against the .hbr.
 - `describe_schema` returns embedded schema + closed-vocabulary enum glossary + canonical join recipes; `sql_query` uses the read-only driver mode (`mode=ro + query_only(1)`) so writes are rejected at the SQLite layer with a "readonly" error rather than by application-side parsing.
-- Known gaps left for later work (documented in the tool descriptions themselves): `list_icf_groups` returns empty until the ingest side persists the parsed groups; `list_entry_points` doesn't yet classify constructor-attributed or `.init_array` entries; `resolve_indirect_call` falls back to the full address-taken pool when `callee_type` is empty (the DWARF `DW_AT_call_target` expression-walker is deferred).
+- Known gaps left for later work (documented in the tool descriptions themselves): `list_icf_groups` returns empty until the ingest side persists the parsed groups; `list_entry_points` doesn't yet classify constructor-attributed or `.init_array` entries; `resolve_indirect_call` still falls back to the full address-taken pool for sites where neither `DW_AT_call_target` nor a call-instruction relocation names a typed target (computed pointers, non-x86-64 objects).
 
 ### Phase 7 — Incremental re-ingest — **deferred**
 
