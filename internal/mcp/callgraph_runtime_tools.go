@@ -28,8 +28,9 @@ func (s *Server) registerCallGraphRuntimeTools() {
 		mcp.WithDescription(
 			"Callees per objdump of the shipped binary (runtime view; post-inlining, "+
 				"post-optimization, per-target). Different answer than list_callees "+
-				"when inlining is aggressive; pair with describe_inline_decisions to "+
-				"see which callees were folded in.",
+				"when inlining is aggressive; the set difference "+
+				"list_callees − list_linked_callees is the definitive 'what got "+
+				"inlined or DCE'd into this caller for this target'.",
 		),
 		mcp.WithString("caller_usr", mcp.Required(),
 			mcp.Description("USR of the caller (from find_symbol.hits[].usr or describe_symbol.usr).")),
@@ -39,10 +40,14 @@ func (s *Server) registerCallGraphRuntimeTools() {
 
 	s.mcp.AddTool(newTool("describe_inline_decisions",
 		mcp.WithDescription(
-			"Which callees GCC inlined into a given caller and which stayed as "+
-				"actual calls. Reconciles source view (list_callees) vs runtime view "+
-				"(list_linked_callees) for that caller — a callee that appears in the "+
-				"first but not the second was inlined here.",
+			"IPA-inline decisions GCC recorded for a caller (from the .cgraph "+
+				"dump's `(inlined)` tag). NOT ground truth for what's inlined in the "+
+				"final binary: misses early tree-level inlines (always_inline, trivial "+
+				"static inlines) and post-IPA folds (RTL inliner, constprop clones, "+
+				"DCE'd calls), all of which show `inlined=0` here despite leaving no "+
+				"call in the binary. For the definitive source-vs-runtime diff for a "+
+				"given target, subtract list_linked_callees from list_callees; use "+
+				"this tool only as corroborating detail on why IPA made its call.",
 		),
 		mcp.WithString("caller_usr", mcp.Required(),
 			mcp.Description("USR of the caller (from find_symbol.hits[].usr or describe_symbol.usr).")),
