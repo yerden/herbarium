@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 
 	"github.com/yerden/herbarium/internal/builddir"
@@ -123,11 +124,120 @@ func Compiler(db *sql.DB, bd *builddir.BuildDir, pr *PathResolver) (Summary, err
 		sum.InlineDecisions++
 	}
 
+	nICF, err := insertICFGroups(tx, tus, resolves, idByUSR, bd.Root)
+	if err != nil {
+		return Summary{}, err
+	}
+	sum.ICFGroups = nICF
+
 	if err := tx.Commit(); err != nil {
 		return Summary{}, fmt.Errorf("ingest: commit: %w", err)
 	}
 	sum.IDByUSR = idByUSR
 	return sum, nil
+}
+
+// insertICFGroups walks each TU's parsed .icf dump and writes one
+// icf_groups row per non-singular class plus one icf_group_members row
+// per loser. Names are resolved to symbol IDs via the same per-TU
+// local-id → USR map used for edges. Groups whose winner or losers
+// cannot be resolved (missing from cgraph, or in a TU that had no
+// .cgraph dump) are dropped rather than partially written.
+func insertICFGroups(tx *sql.Tx, tus []*tuData, resolves map[string]perTUResolve, idByUSR map[string]int64, builddirRoot string) (int, error) {
+	groupStmt, err := tx.Prepare(
+		`INSERT INTO icf_groups (winner_symbol_id, object_file) VALUES (?, ?)`)
+	if err != nil {
+		return 0, fmt.Errorf("ingest: prepare icf_groups: %w", err)
+	}
+	defer groupStmt.Close()
+	memberStmt, err := tx.Prepare(
+		`INSERT INTO icf_group_members (group_id, symbol_id) VALUES (?, ?)`)
+	if err != nil {
+		return 0, fmt.Errorf("ingest: prepare icf_group_members: %w", err)
+	}
+	defer memberStmt.Close()
+
+	written := 0
+	for _, tu := range tus {
+		if tu.icf == nil || len(tu.icf.Groups) == 0 || tu.cgraph == nil {
+			continue
+		}
+		res := resolves[tu.object]
+		if res == nil {
+			continue
+		}
+		nameToID := buildNameToSymbolID(tu, res, idByUSR)
+		for _, g := range tu.icf.Groups {
+			winnerID, ok := nameToID[g.WinnerName]
+			if !ok {
+				continue
+			}
+			var loserIDs []int64
+			for _, l := range g.LoserNames {
+				if id, ok := nameToID[l]; ok && id != winnerID {
+					loserIDs = append(loserIDs, id)
+				}
+			}
+			if len(loserIDs) == 0 {
+				continue
+			}
+			objRel := tu.object
+			if rel, err := filepath.Rel(builddirRoot, tu.object); err == nil {
+				objRel = rel
+			}
+			res, err := groupStmt.Exec(winnerID, objRel)
+			if err != nil {
+				return 0, fmt.Errorf("ingest: insert icf_group: %w", err)
+			}
+			gid, err := res.LastInsertId()
+			if err != nil {
+				return 0, err
+			}
+			for _, lid := range loserIDs {
+				if _, err := memberStmt.Exec(gid, lid); err != nil {
+					return 0, fmt.Errorf("ingest: insert icf_group_member: %w", err)
+				}
+			}
+			written++
+		}
+	}
+	return written, nil
+}
+
+// buildNameToSymbolID inverts the TU's local-id resolver into a
+// name → symbol_id map for the symbols defined in that TU. Multiple
+// local IDs may share a name (clones), so the first stable entry wins;
+// this is only used for ICF resolution where names come straight from
+// the .icf dump's alias references and are always the original names.
+func buildNameToSymbolID(tu *tuData, res perTUResolve, idByUSR map[string]int64) map[string]int64 {
+	out := map[string]int64{}
+	if tu.cgraph == nil {
+		return out
+	}
+	ids := make([]string, 0, len(tu.cgraph.Symbols))
+	for id := range tu.cgraph.Symbols {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, localID := range ids {
+		fn := tu.cgraph.Symbols[localID]
+		if fn.Name == "" {
+			continue
+		}
+		if _, seen := out[fn.Name]; seen {
+			continue
+		}
+		usr, ok := res[localID]
+		if !ok {
+			continue
+		}
+		symID, ok := idByUSR[usr]
+		if !ok {
+			continue
+		}
+		out[fn.Name] = symID
+	}
+	return out
 }
 
 // Summary counts what Compiler wrote. Displayed by cmd/herbarium after
@@ -137,6 +247,7 @@ type Summary struct {
 	Symbols         int
 	CallEdges       int
 	InlineDecisions int
+	ICFGroups       int
 	// idByUSR is exposed so the DWARF pass can look up symbol row ids
 	// by USR to UPSERT signatures and enrich decl locations.
 	IDByUSR map[string]int64

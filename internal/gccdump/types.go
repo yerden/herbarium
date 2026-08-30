@@ -147,14 +147,15 @@ type InlineDump struct {
 }
 
 // ICFGroup is one non-singular congruence class from a .icf dump.
+// GCC's IPA-ICF picks a surviving symbol (WinnerName) and rewrites each
+// LoserName's body to tail-call WinnerName's synthesized `.localalias`.
 type ICFGroup struct {
-	// MemberNames lists the folded functions by name. Winning symbol is
-	// determined by the linker, not by ICF, so the group is unordered.
-	MemberNames []string
+	WinnerName string
+	LoserNames []string
 }
 
-// ICFDump is the top-level result of parsing a .icf file. Members is
-// empty when every class is singular (as on our fixture).
+// ICFDump is the top-level result of parsing a .icf file. Groups is
+// empty when no non-singular class fires.
 type ICFDump struct {
 	Groups []ICFGroup
 }

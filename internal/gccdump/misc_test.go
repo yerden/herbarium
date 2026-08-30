@@ -62,10 +62,8 @@ func TestParseICFEmpty(t *testing.T) {
 
 func TestParseICFFolded(t *testing.T) {
 	// icf_pair.c defines two semantically-equivalent helpers that GCC's
-	// ICF pass folds into one class. The parser currently reports N
-	// placeholder groups keyed off the "in a non-singular class: N"
-	// line — the exact member-name extraction is future work, but the
-	// count must be non-zero so downstream tooling knows folding fired.
+	// ICF pass folds into one class: icf_add_one wins, icf_bump_by_one
+	// gets its body rewritten to tail-call icf_add_one.localalias.
 	d, err := gccdump.ParseICFFile(filepath.Join(
 		repoRoot(t), "testdata", "samples", "gcc-16",
 		"lib", "icf_pair.c.c.089i.icf",
@@ -73,8 +71,15 @@ func TestParseICFFolded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseICFFile: %v", err)
 	}
-	if len(d.Groups) == 0 {
-		t.Errorf("icf_pair.c produced 0 groups; expected the ICF-forced pair to fire")
+	if len(d.Groups) != 1 {
+		t.Fatalf("icf_pair.c produced %d groups; want 1", len(d.Groups))
+	}
+	g := d.Groups[0]
+	if g.WinnerName != "icf_add_one" {
+		t.Errorf("winner = %q, want icf_add_one", g.WinnerName)
+	}
+	if len(g.LoserNames) != 1 || g.LoserNames[0] != "icf_bump_by_one" {
+		t.Errorf("losers = %v, want [icf_bump_by_one]", g.LoserNames)
 	}
 }
 

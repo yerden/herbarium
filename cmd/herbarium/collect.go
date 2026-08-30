@@ -152,6 +152,7 @@ func runCollect(args []string) int {
 	fmt.Printf("  symbols:             %d\n", sum.Symbols)
 	fmt.Printf("  cgraph call edges:   %d\n", sum.CallEdges)
 	fmt.Printf("  inline decisions:    %d\n", sum.InlineDecisions)
+	fmt.Printf("  icf groups:          %d\n", sum.ICFGroups)
 	fmt.Printf("  signatures:          %d\n", dwarfSum.Signatures)
 	fmt.Printf("  decl locations:      %d\n", dwarfSum.DeclLocations)
 	fmt.Printf("  indirect sites:      %d\n", dwarfSum.IndirectSites)

@@ -217,6 +217,26 @@ func TestE2EFixtureContract(t *testing.T) {
 		}
 	}
 
+	// --- IPA-ICF folded icf_bump_by_one into icf_add_one ---
+	{
+		var resp herbmcp.ListICFGroupsResponse
+		call(t, client, ctx, "list_icf_groups", nil, &resp)
+		if resp.Total != 1 {
+			t.Fatalf("list_icf_groups: Total = %d, want 1", resp.Total)
+		}
+		g := resp.Groups[0]
+		if g.Winner.Name != "icf_add_one" {
+			t.Errorf("winner = %q, want icf_add_one", g.Winner.Name)
+		}
+		var loserNames []string
+		for _, l := range g.Losers {
+			loserNames = append(loserNames, l.Name)
+		}
+		if len(g.Losers) != 1 || g.Losers[0].Name != "icf_bump_by_one" {
+			t.Errorf("losers = %v, want [icf_bump_by_one]", loserNames)
+		}
+	}
+
 	// --- Weak-symbols listing includes hook ---
 	{
 		var resp herbmcp.ListWeakSymbolsResponse

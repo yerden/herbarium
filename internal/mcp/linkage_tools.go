@@ -48,15 +48,16 @@ func (s *Server) registerLinkageTools() {
 
 	s.mcp.AddTool(newTool("list_icf_groups",
 		mcp.WithDescription(
-			"Functions merged by identical-code folding (from GCC's -fdump-ipa-icf). "+
-				"NOTE: the current ingest pipeline parses the ICF dump but does not "+
-				"persist folded groups; returns an empty list until that fires. A "+
-				"symbol folded away has no link_resolutions row of its own, so it will "+
-				"show up in list_unreachable_symbols as a false positive until this "+
-				"gap is filled.",
+			"Functions merged by GCC's IPA identical-code folding (from "+
+				"-fdump-ipa-icf). Each group has one winner (the surviving symbol) "+
+				"and one or more losers whose bodies were rewritten to tail-call "+
+				"winner.localalias. Linker-level ICF (gold/lld --icf=all) is a "+
+				"separate pass and NOT tracked here — if the linker folded further, "+
+				"this tool will underreport. Use with a target arg to restrict to "+
+				"groups whose winner reaches that binary.",
 		),
 		mcp.WithString("target",
-			mcp.Description("Restrict to groups reachable in this target.")),
+			mcp.Description("Restrict to groups whose winner has a link_resolutions row for this target.")),
 	), s.handleListICFGroups)
 
 	s.mcp.AddTool(newTool("list_unreachable_symbols",
@@ -65,13 +66,14 @@ func (s *Server) registerLinkageTools() {
 				"a first-pass dead-code signal. Unfiltered, so expect false positives: "+
 				"(1) internal-linkage symbols (static functions, header-defined "+
 				"statics) are never surfaced in link_resolutions by design and always "+
-				"appear here; (2) symbols folded away by ICF appear here until "+
-				"list_icf_groups persistence lands; (3) symbols reachable only from "+
-				"__attribute__((constructor)) / .init_array chains appear here because "+
-				"list_entry_points does not classify those; (4) symbols inlined at "+
-				"every call site appear here — use describe_inline_decisions on their "+
-				"callers to distinguish. Verify any surprising hit with describe_symbol "+
-				"(per-target link_resolutions in one call) before calling it dead.",
+				"appear here; (2) IPA-ICF losers appear here — cross-reference with "+
+				"list_icf_groups, and the winner is what actually ships; (3) symbols "+
+				"reachable only from __attribute__((constructor)) / .init_array chains "+
+				"appear here because list_entry_points does not classify those; (4) "+
+				"symbols inlined at every call site appear here — compare list_callees "+
+				"against list_linked_callees on their callers to distinguish. Verify "+
+				"any surprising hit with describe_symbol (per-target link_resolutions "+
+				"in one call) before calling it dead.",
 		),
 		mcp.WithString("target", mcp.Required(),
 			mcp.Description("Target binary name — reachability is per-target.")),
@@ -306,27 +308,104 @@ func (s *Server) handleListUndefinedSymbols(_ context.Context, req mcp.CallToolR
 
 // ICFGroup is one folded-symbol cluster.
 type ICFGroup struct {
-	Winner  SymbolRef   `json:"winner"`
-	Folded  []SymbolRef `json:"folded"`
+	Winner     SymbolRef   `json:"winner"`
+	Losers     []SymbolRef `json:"losers"`
+	ObjectFile string      `json:"object_file"`
 }
 
 // ListICFGroupsResponse is what list_icf_groups returns.
 type ListICFGroupsResponse struct {
 	Groups []ICFGroup `json:"groups"`
 	Total  int        `json:"total"`
-	Note   string     `json:"note,omitempty"`
 }
 
-func (s *Server) handleListICFGroups(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	// The current ingest pipeline parses the ICF dump but does not
-	// persist folded groups (no icf_groups table exists yet). Return
-	// empty with an explanatory note so the agent doesn't misread the
-	// silence as "no folding happened."
-	return jsonResult(ListICFGroupsResponse{
-		Groups: []ICFGroup{},
-		Total:  0,
-		Note:   "ICF group persistence is not yet wired into ingest; parsed but not stored (herbarium-plan.md Phase 8 fixture).",
-	})
+func (s *Server) handleListICFGroups(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	target := req.GetString("target", "")
+	var targetID int64
+	if target != "" {
+		id, err := s.targetIDByName(target)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		targetID = id
+	}
+
+	// Fetch groups first, then members per group. Two-step keeps the
+	// SymbolRef marshaling straightforward.
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if target != "" {
+		rows, err = s.db.Query(`
+			SELECT g.id, g.object_file, w.usr, w.name, w.kind, IFNULL(w.signature, '')
+			FROM icf_groups g
+			JOIN symbols w ON w.id = g.winner_symbol_id
+			WHERE EXISTS (
+			  SELECT 1 FROM link_resolutions lr
+			  WHERE lr.target_id = ? AND lr.usr = w.usr)
+			ORDER BY w.name`, targetID)
+	} else {
+		rows, err = s.db.Query(`
+			SELECT g.id, g.object_file, w.usr, w.name, w.kind, IFNULL(w.signature, '')
+			FROM icf_groups g
+			JOIN symbols w ON w.id = g.winner_symbol_id
+			ORDER BY w.name`)
+	}
+	if err != nil {
+		return mcp.NewToolResultError("list_icf_groups: " + err.Error()), nil
+	}
+	defer rows.Close()
+
+	type groupRow struct {
+		id  int64
+		obj string
+		win SymbolRef
+	}
+	var groups []groupRow
+	for rows.Next() {
+		var g groupRow
+		if err := rows.Scan(&g.id, &g.obj, &g.win.USR, &g.win.Name, &g.win.Kind, &g.win.Signature); err != nil {
+			return mcp.NewToolResultError("scan: " + err.Error()), nil
+		}
+		groups = append(groups, g)
+	}
+	if err := rows.Err(); err != nil {
+		return mcp.NewToolResultError("iterate: " + err.Error()), nil
+	}
+
+	out := make([]ICFGroup, 0, len(groups))
+	for _, g := range groups {
+		lrows, err := s.db.Query(`
+			SELECT s.usr, s.name, s.kind, IFNULL(s.signature, '')
+			FROM icf_group_members m
+			JOIN symbols s ON s.id = m.symbol_id
+			WHERE m.group_id = ?
+			ORDER BY s.name`, g.id)
+		if err != nil {
+			return mcp.NewToolResultError("list_icf_groups members: " + err.Error()), nil
+		}
+		var losers []SymbolRef
+		for lrows.Next() {
+			var r SymbolRef
+			if err := lrows.Scan(&r.USR, &r.Name, &r.Kind, &r.Signature); err != nil {
+				lrows.Close()
+				return mcp.NewToolResultError("scan: " + err.Error()), nil
+			}
+			losers = append(losers, r)
+		}
+		if err := lrows.Err(); err != nil {
+			lrows.Close()
+			return mcp.NewToolResultError("iterate: " + err.Error()), nil
+		}
+		lrows.Close()
+		out = append(out, ICFGroup{
+			Winner:     g.win,
+			Losers:     losers,
+			ObjectFile: g.obj,
+		})
+	}
+	return jsonResult(ListICFGroupsResponse{Groups: out, Total: len(out)})
 }
 
 // -- list_unreachable_symbols ----------------------------------------

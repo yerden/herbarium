@@ -137,6 +137,27 @@ CREATE TABLE inline_decisions (
   inlined   INTEGER             -- 0/1
 );
 
+-- Identical-code folding groups from GCC's -fdump-ipa-icf. IPA-ICF only:
+-- linker-level ICF (gold/lld --icf=all) is a different pass and is not
+-- tracked. One row per non-singular class per TU; a group's winner is
+-- the surviving symbol, losers had their bodies rewritten to tail-call
+-- winner.localalias.
+CREATE TABLE icf_groups (
+  id               INTEGER PRIMARY KEY,
+  winner_symbol_id INTEGER NOT NULL REFERENCES symbols(id),
+  object_file      TEXT    NOT NULL   -- .o where the fold was recorded, builddir-relative
+);
+CREATE INDEX idx_icfg_winner ON icf_groups(winner_symbol_id);
+
+-- Loser members of an ICF group. Winner is on the group row; only losers
+-- appear here so a "was this folded away" query is one WHERE clause.
+CREATE TABLE icf_group_members (
+  group_id  INTEGER NOT NULL REFERENCES icf_groups(id),
+  symbol_id INTEGER NOT NULL REFERENCES symbols(id),
+  PRIMARY KEY (group_id, symbol_id)
+);
+CREATE INDEX idx_icfm_symbol ON icf_group_members(symbol_id);
+
 -- Linkage-time truth
 CREATE TABLE link_resolutions (
   target_id      INTEGER REFERENCES targets(id),

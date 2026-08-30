@@ -116,7 +116,7 @@ func TestListUndefinedSymbols(t *testing.T) {
 	}
 }
 
-func TestListICFGroupsEmpty(t *testing.T) {
+func TestListICFGroups(t *testing.T) {
 	client := startClient(t, fixtureHBR(t))
 	req := mcp.CallToolRequest{}
 	req.Params.Name = "list_icf_groups"
@@ -131,11 +131,42 @@ func TestListICFGroupsEmpty(t *testing.T) {
 	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if payload.Total != 0 {
-		t.Errorf("Total = %d, want 0 (ICF not persisted)", payload.Total)
+	// icf_pair.c forces one fold: icf_add_one wins, icf_bump_by_one loses.
+	if payload.Total != 1 {
+		t.Fatalf("Total = %d, want 1 (icf_pair.c should force one fold); groups=%+v", payload.Total, payload.Groups)
 	}
-	if payload.Note == "" {
-		t.Error("expected an explanatory Note")
+	g := payload.Groups[0]
+	if g.Winner.Name != "icf_add_one" {
+		t.Errorf("winner = %q, want icf_add_one", g.Winner.Name)
+	}
+	if len(g.Losers) != 1 || g.Losers[0].Name != "icf_bump_by_one" {
+		t.Errorf("losers = %+v, want [icf_bump_by_one]", g.Losers)
+	}
+	if !strings.Contains(g.ObjectFile, "icf_pair.c.o") {
+		t.Errorf("object_file = %q, want to contain icf_pair.c.o", g.ObjectFile)
+	}
+}
+
+func TestListICFGroupsTargetFilter(t *testing.T) {
+	client := startClient(t, fixtureHBR(t))
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "list_icf_groups"
+	req.Params.Arguments = map[string]any{"target": "app1"}
+	res, err := client.CallTool(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("error: %s", textOf(t, res))
+	}
+	var payload herbmcp.ListICFGroupsResponse
+	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// app1 calls icf_add_one directly, so the winner has a link_resolutions
+	// row for app1 and the group survives the filter.
+	if payload.Total != 1 {
+		t.Fatalf("Total = %d, want 1 (app1 links against libshared with the fold)", payload.Total)
 	}
 }
 

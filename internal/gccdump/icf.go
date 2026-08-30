@@ -6,8 +6,7 @@ import (
 	"io"
 	"os"
 	"regexp"
-	"strconv"
-	"strings"
+	"sort"
 )
 
 // Grammar (from GCC 16 -fdump-ipa-icf):
@@ -15,18 +14,32 @@ import (
 //   Dump after hash based groups
 //   Congruence classes: N with total: M items (in a non-singular class: K)
 //   ...
-//   Item count: M
-//   Congruent classes before: X, after: Y
+//   Introduced new external node (WINNER.localalias/id).
 //   ...
+//   Analyzing function: LOSER/id
+//   ...
+//     scanning: retval.2_4 = WINNER.localalias (x_2(D)); [tail call]
+//   ...
+//   int LOSER (int x)
+//   {
+//     ...
+//     retval.2_4 = WINNER.localalias (x_2(D)); [tail call]
+//     ...
+//   }
 //
-// Only "in a non-singular class: K" with K > 0 indicates actual folding.
-// When ICF fires, GCC also emits a summary listing the members of each
-// non-singular class — the exact format has drifted across GCC versions,
-// so we currently report only that folding occurred (Groups is empty in
-// that case) and leave the per-group breakdown to Phase 8's richer
-// fixture, which forces ICF and pins down the exact format.
+// A fold produces two independent signals: (1) `Introduced new external
+// node (WINNER.localalias/id)` tells us the winning symbol; (2) every
+// loser's rewritten body invokes `WINNER.localalias(...)`. We correlate
+// the invocation with the most recent `Analyzing function: LOSER/id` to
+// pin down which function was folded. GCC's earlier per-class member
+// listing was never emitted in this dump kind — the alias + rewritten
+// bodies are the load-bearing artifacts.
 
-var icfNonSingular = regexp.MustCompile(`in a non-singular class:\s*(\d+)`)
+var (
+	icfIntroducedRe = regexp.MustCompile(`Introduced new external node \(([A-Za-z_][\w.$]*)\.localalias/\d+\)`)
+	icfAnalyzingRe  = regexp.MustCompile(`^Analyzing function:\s+([A-Za-z_][\w.$]*)/\d+`)
+	icfAliasCallRe  = regexp.MustCompile(`\b([A-Za-z_][\w.$]*)\.localalias\s*\(`)
+)
 
 // ParseICFFile parses one .icf dump.
 func ParseICFFile(path string) (*ICFDump, error) {
@@ -48,21 +61,60 @@ func ParseICF(r io.Reader) (*ICFDump, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
 
-	var maxFolded int
+	winners := map[string]bool{}
+	// winner → set of losers
+	losersOf := map[string]map[string]bool{}
+	var currentFn string
+
 	for sc.Scan() {
-		trimmed := strings.TrimSpace(sc.Text())
-		if m := icfNonSingular.FindStringSubmatch(trimmed); m != nil {
-			n, _ := strconv.Atoi(m[1])
-			if n > maxFolded {
-				maxFolded = n
+		line := sc.Text()
+		if m := icfIntroducedRe.FindStringSubmatch(line); m != nil {
+			winners[m[1]] = true
+			continue
+		}
+		if m := icfAnalyzingRe.FindStringSubmatch(line); m != nil {
+			currentFn = m[1]
+			continue
+		}
+		// A `.localalias` call inside a function body attributes that
+		// function to the winner's group. Self-calls (winner referring to
+		// its own alias) are impossible in IPA-ICF's wrapper scheme but
+		// guarded anyway.
+		for _, m := range icfAliasCallRe.FindAllStringSubmatch(line, -1) {
+			winner := m[1]
+			if currentFn == "" || currentFn == winner {
+				continue
 			}
+			if losersOf[winner] == nil {
+				losersOf[winner] = map[string]bool{}
+			}
+			losersOf[winner][currentFn] = true
 		}
 	}
-	// Placeholder: when we see folding, record N empty groups so
-	// downstream code sees the signal. Phase 8's fixture will replace
-	// this with member-name extraction.
-	for i := 0; i < maxFolded; i++ {
-		dump.Groups = append(dump.Groups, ICFGroup{})
+	if err := sc.Err(); err != nil {
+		return nil, err
 	}
-	return dump, sc.Err()
+
+	// Emit only groups where we have both a confirmed winner and at
+	// least one loser rewritten against its alias — partial signals
+	// are dropped so downstream code never records a bare winner.
+	for w := range winners {
+		losers := losersOf[w]
+		if len(losers) == 0 {
+			continue
+		}
+		names := make([]string, 0, len(losers))
+		for l := range losers {
+			names = append(names, l)
+		}
+		sort.Strings(names)
+		dump.Groups = append(dump.Groups, ICFGroup{
+			WinnerName: w,
+			LoserNames: names,
+		})
+	}
+	sort.Slice(dump.Groups, func(i, j int) bool {
+		return dump.Groups[i].WinnerName < dump.Groups[j].WinnerName
+	})
+	return dump, nil
 }

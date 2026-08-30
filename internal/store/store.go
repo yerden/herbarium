@@ -42,7 +42,12 @@ import (
 // under builddir were silently skipped — so configure_file() output
 // like config.h never made it into the .hbr. Key is builddir-relative
 // so the value is portable.
-const SchemaVersion = "5"
+//
+// v6: adds icf_groups + icf_group_members tables. Before v6, the .icf
+// dump was parsed but folded groups were not persisted, so
+// list_icf_groups always returned empty and ICF-folded losers surfaced
+// as false-positive dead symbols in list_unreachable_symbols.
+const SchemaVersion = "6"
 
 //go:embed schema.sql
 var schemaSQL string
