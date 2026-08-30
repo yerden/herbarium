@@ -56,6 +56,10 @@ func logf(format string, args ...any) {
 // caller can diagnose what the tool actually complained about — the
 // default *exec.ExitError only surfaces the exit code, which is useless
 // in isolation.
+//
+// Buffers the full stdout in memory. Fine for nm and map-file consumers
+// (small payloads); use runToolStreaming for objdump, whose disassembly
+// output on a large binary can be hundreds of megabytes.
 func runTool(name string, args ...string) ([]byte, error) {
 	logf("$ %s %s\n", name, strings.Join(args, " "))
 	cmd := exec.Command(name, args...)
@@ -74,6 +78,89 @@ func runTool(name string, args ...string) ([]byte, error) {
 	logf("  (%s, FAILED: %v)\n", elapsed.Round(time.Millisecond), err)
 	return nil, wrapToolErr(name, args, stdout, stderr.Bytes(), err)
 }
+
+// runToolStreaming runs a tool and invokes consume with a Reader over
+// its stdout — nothing is buffered end-to-end, so peak memory stays at
+// the consumer's scan buffer regardless of payload size. Necessary for
+// objdump on real-world binaries: buffering the full disassembly would
+// resident-set hundreds of megabytes per linked target for facts we
+// throw away line-by-line during parse.
+//
+// Error semantics mirror runTool: stderr is captured and spliced into
+// the returned error alongside a bounded stdout head (from a
+// tee-buffer, since the pipe was drained by consume). If consume itself
+// returns an error the process is still reaped — no zombies.
+func runToolStreaming(name string, args []string, consume func(io.Reader) error) error {
+	logf("$ %s %s\n", name, strings.Join(args, " "))
+	cmd := exec.Command(name, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("%s: stdout pipe: %w", name, err)
+	}
+	start := time.Now()
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("%s: start: %w", name, err)
+	}
+	// Tee a bounded head of stdout so a nonzero-exit error message can
+	// carry the same "first N bytes" context runTool provides.
+	head := &boundedBuffer{limit: stdoutHeadLimit}
+	counter := &countingReader{r: io.TeeReader(stdout, head)}
+
+	consumeErr := consume(counter)
+	// Drain anything the consumer didn't read — otherwise the child may
+	// block on a full pipe and Wait() would hang.
+	if consumeErr != nil {
+		_, _ = io.Copy(io.Discard, counter)
+	}
+	waitErr := cmd.Wait()
+	elapsed := time.Since(start)
+	switch {
+	case consumeErr != nil:
+		logf("  (%s, FAILED: %v)\n", elapsed.Round(time.Millisecond), consumeErr)
+		return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), consumeErr)
+	case waitErr != nil:
+		logf("  (%s, FAILED: %v)\n", elapsed.Round(time.Millisecond), waitErr)
+		return wrapToolErr(name, args, head.Bytes(), stderr.Bytes(), waitErr)
+	}
+	logf("  (%s, %s)\n", elapsed.Round(time.Millisecond), byteCount(counter.n))
+	return nil
+}
+
+// countingReader tracks total bytes read from the underlying reader.
+// Used by runToolStreaming for the per-invocation size log.
+type countingReader struct {
+	r io.Reader
+	n int
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += n
+	return n, err
+}
+
+// boundedBuffer stores at most limit bytes of writes; extras are
+// dropped. Used to capture a stdout head for error messages without
+// paying the full payload's memory cost.
+type boundedBuffer struct {
+	buf   []byte
+	limit int
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	if room := b.limit - len(b.buf); room > 0 {
+		if len(p) <= room {
+			b.buf = append(b.buf, p...)
+		} else {
+			b.buf = append(b.buf, p[:room]...)
+		}
+	}
+	return len(p), nil
+}
+
+func (b *boundedBuffer) Bytes() []byte { return b.buf }
 
 // byteCount formats n as a compact human-readable size (e.g., "4.2 MB").
 func byteCount(n int) string {

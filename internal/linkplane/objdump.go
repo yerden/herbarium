@@ -2,6 +2,7 @@ package linkplane
 
 import (
 	"bufio"
+	"io"
 	"regexp"
 	"strconv"
 	"strings"
@@ -51,20 +52,28 @@ var (
 )
 
 // RunObjdump runs `objdump -d --demangle --no-show-raw-insn` on path
-// and returns every direct call/jump edge.
+// and returns every direct call/jump edge. Streams stdout line-by-line
+// — a large binary's disassembly can exceed 100 MB and we drop >99% of
+// bytes during scan, so buffering the full payload would spike RSS for
+// no benefit.
 func RunObjdump(path string) ([]ObjdumpEdge, error) {
-	stdout, err := runTool("objdump", "-d", "--demangle", "--no-show-raw-insn", path)
+	var edges []ObjdumpEdge
+	err := runToolStreaming("objdump", []string{"-d", "--demangle", "--no-show-raw-insn", path}, func(r io.Reader) error {
+		out, perr := parseObjdumpStream(r)
+		edges = out
+		return perr
+	})
 	if err != nil {
 		return nil, err
 	}
-	return parseObjdump(string(stdout))
+	return edges, nil
 }
 
-func parseObjdump(out string) ([]ObjdumpEdge, error) {
+func parseObjdumpStream(r io.Reader) ([]ObjdumpEdge, error) {
 	var edges []ObjdumpEdge
 	var curFunc string
 	var curFuncAddr uint64
-	sc := bufio.NewScanner(strings.NewReader(out))
+	sc := bufio.NewScanner(r)
 	// Long .text sections can produce lines wider than the default 64K.
 	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
 
