@@ -2,6 +2,8 @@
 /build/
 /dist/
 *.hbr
+/cmd/herbarium/herbarium
+/herbarium
 
 # Fixture build dirs (kept out of git; regenerated via scripts/build.sh)
 testdata/fixture/builddir/
