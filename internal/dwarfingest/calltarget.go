@@ -66,10 +66,14 @@ type indirectResolver struct {
 	tc *typeCache
 	dw *dwarf.Data
 
-	// x86Reloc is false on architectures where the return_pc-4 rule
-	// below does not hold; the relocation route is then skipped
-	// entirely rather than matching something unrelated.
-	x86Reloc bool
+	// sysvAMD64 gates BOTH routes, not just the relocation one. DWARF
+	// register numbers are per-architecture, so argRegOrder is not
+	// merely useless elsewhere — it silently means something else:
+	// AArch64 numbers x0-x7 as DWARF 0-7, so x1 (the second argument)
+	// is register 1, which is rdx's slot here and would name the third
+	// parameter. The return_pc-4 rule is likewise x86-64 instruction
+	// encoding.
+	sysvAMD64 bool
 
 	funcSyms map[string]elf.Symbol                 // FUNC symbol by name
 	relocs   map[uint32]map[uint64]callTargetReloc // section index → offset → reloc
@@ -78,12 +82,12 @@ type indirectResolver struct {
 
 func newIndirectResolver(f *elf.File, dw *dwarf.Data, tc *typeCache, varTypes map[string]dwarf.Offset) *indirectResolver {
 	ir := &indirectResolver{
-		tc:       tc,
-		dw:       dw,
-		x86Reloc: f.Machine == elf.EM_X86_64 && f.Class == elf.ELFCLASS64,
-		funcSyms: map[string]elf.Symbol{},
-		relocs:   map[uint32]map[uint64]callTargetReloc{},
-		varTypes: varTypes,
+		tc:        tc,
+		dw:        dw,
+		sysvAMD64: f.Machine == elf.EM_X86_64 && f.Class == elf.ELFCLASS64,
+		funcSyms:  map[string]elf.Symbol{},
+		relocs:    map[uint32]map[uint64]callTargetReloc{},
+		varTypes:  varTypes,
 	}
 
 	syms, err := f.Symbols()
@@ -99,7 +103,7 @@ func newIndirectResolver(f *elf.File, dw *dwarf.Data, tc *typeCache, varTypes ma
 			}
 		}
 	}
-	if ir.x86Reloc {
+	if ir.sysvAMD64 {
 		ir.loadRelocs(f, syms)
 	}
 	return ir
@@ -143,6 +147,9 @@ func (ir *indirectResolver) loadRelocs(f *elf.File, syms []elf.Symbol) {
 // resolve fills cs.CalleeType and cs.FieldHint, leaving them empty when
 // neither route yields a typed answer.
 func (ir *indirectResolver) resolve(cs *CallSite) {
+	if !ir.sysvAMD64 {
+		return
+	}
 	if len(cs.callTarget) > 0 && ir.resolveViaCallTarget(cs) {
 		return
 	}
@@ -266,7 +273,7 @@ func (ir *indirectResolver) returnTypeOff(spOff dwarf.Offset) dwarf.Offset {
 // symbol + addend + 4 (the displacement is relative to the *end* of the
 // instruction, which is return_pc).
 func (ir *indirectResolver) resolveViaReloc(cs *CallSite) bool {
-	if !ir.x86Reloc || cs.returnPC < 4 || cs.EnclosingName == "" {
+	if cs.returnPC < 4 || cs.EnclosingName == "" {
 		return false
 	}
 	sym, ok := ir.funcSyms[cs.EnclosingName]

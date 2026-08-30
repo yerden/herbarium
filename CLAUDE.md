@@ -7,7 +7,7 @@ Working notes for Claude when editing this repo. Read `herbarium-plan.md` first 
 `herbarium` ingests an already-built Meson C project into a single SQLite artifact (`.hbr`) and serves it over MCP for AI agents. Every fact in the index traces back to a compiler dump (GCC's `-fcallgraph-info`, `-fdump-ipa-*`), DWARF, or a binutils inspector (`nm`, `objdump`) — never to a re-parser. Two subcommands:
 
 - `herbarium collect` — reads a builddir + project-root, writes an `.hbr`.
-- `herbarium serve` — opens an `.hbr` read-only, exposes 23 MCP tools over stdio or streamable HTTP.
+- `herbarium serve` — opens an `.hbr` read-only, exposes 27 MCP tools over stdio or streamable HTTP.
 
 ## Non-negotiables (from `herbarium-plan.md § Design principles`)
 
@@ -33,7 +33,7 @@ internal/
   linkplane/            nm + objdump + map file parsers; runTool wraps exec
   usr/                  USR synthesis per herbarium-plan.md appendix
   ingest/               pipeline orchestrator: Compiler, DWARF, Targets, Link, Sources
-  mcp/                  MCP server + 23 tools; tests build fixture .hbr in-process
+  mcp/                  MCP server + 27 tools; tests build fixture .hbr in-process
 testdata/
   fixture/              minimal Meson project the tests build against
   samples/gcc-16/       pinned parser fixtures (dump files, map files, .ninja_deps)
@@ -70,13 +70,13 @@ Groups:
 - **Call graph, source view:** `list_callers`, `list_callees`, `list_call_paths` (in-memory DFS, cycle-in-path guard, max_depth cap).
 - **Call graph, runtime view:** `list_linked_callers`, `list_linked_callees`, `describe_inline_decisions`.
 - **Indirect:** `list_indirect_call_sites`, `list_address_taken_functions`, `resolve_indirect_call`, `list_devirt_hints`.
-- **Linkage + reachability:** `describe_link_resolution`, `list_weak_symbols`, `list_undefined_symbols`, `list_icf_groups` (empty until persistence lands), `list_unreachable_symbols`, `list_entry_points`.
+- **Linkage + reachability:** `describe_link_resolution`, `list_weak_symbols`, `list_undefined_symbols`, `list_icf_groups`, `list_unreachable_symbols`, `list_entry_points`.
 
 ## Known gaps
 
 Documented in tool descriptions and in `herbarium-plan.md § Phase 6`:
 
-- `indirect_call_sites.callee_type` and `.field_hint` are resolved in `internal/dwarfingest/calltarget.go` from two sources: `DW_AT_call_target`'s register forms (calls through a fn-pointer parameter) and, where GCC emits no `call_target` at all (the `g_ops.add` dispatch-table shape), the `R_X86_64_PC32` relocation at `return_pc-4`. The relocation route is x86-64-only; the `call_target` route replays the SysV integer-register assignment and declines any parameter list it cannot replay (a leading `double` shifts every later argument's register). Both routes leave the columns empty rather than guess when the chain doesn't bottom out at a pointer-to-subroutine — so a call through a computed pointer still yields nothing and `resolve_indirect_call` falls back to the full address-taken pool there.
+- `indirect_call_sites.callee_type` / `.field_hint` resolve for the common shapes but not all of them: a computed pointer, a non-x86-64 object, or a parameter list whose SysV register assignment can't be replayed all leave both columns empty. Both routes are gated on x86-64, not just the relocation one — DWARF register numbers are per-architecture, so `argRegOrder` applied to AArch64 wouldn't fail, it would silently name the wrong parameter, and `resolve_indirect_call` falls back to the full address-taken pool there. `internal/dwarfingest/calltarget.go` has two routes — `DW_AT_call_target`'s register forms (calls through a fn-pointer parameter) and, where GCC emits no `call_target` at all (the `g_ops.add` dispatch-table shape), the `R_X86_64_PC32` relocation at `return_pc-4`. Both decline rather than guess when the chain doesn't bottom out at a pointer-to-subroutine; a wrong `callee_type` is worse than an empty one, since it narrows `resolve_indirect_call` to confidently wrong candidates.
 - `list_icf_groups` covers IPA-ICF only (from GCC's `.icf` dumps). Linker-level ICF (gold/lld `--icf=all`) is a separate pass and not tracked — if the linker folds further, this tool underreports.
 - `list_entry_points` covers `main` + externally-visible symbols. Constructor-attributed (`__attribute__((constructor))`) and `.init_array` entries are not classified — would need an additional DWARF pass.
 - `link_resolutions.losing_objects` is derived from an nm scan across every .o in the builddir, so it lists "other .o's that also define this symbol" — broader than a strict map-file impl, which would list only candidates ld actually weighed. Archive members ld never pulled in still show up here.
