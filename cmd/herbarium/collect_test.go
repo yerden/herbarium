@@ -97,6 +97,59 @@ func TestCollectTargetFilter(t *testing.T) {
 	}
 }
 
+// TestCollectMultipleTargets verifies that --target may be repeated,
+// with each occurrence contributing to the kept set. Mixing a
+// comma-separated entry with a bare entry exercises both code paths in
+// filterTargets.
+func TestCollectMultipleTargets(t *testing.T) {
+	repo := repoRoot(t)
+	bdir := filepath.Join(repo, "testdata", "fixture", "builddir")
+	proot := filepath.Join(repo, "testdata", "fixture")
+	out := filepath.Join(t.TempDir(), "app12.hbr")
+
+	if code := runCollect([]string{
+		"--builddir", bdir,
+		"--project-root", proot,
+		"--out", out,
+		"--target", "app1",
+		"--target", "app2,shared",
+	}); code != 0 {
+		t.Fatalf("runCollect exit code = %d, want 0", code)
+	}
+
+	db, err := sql.Open("sqlite", "file:"+out+"?mode=ro")
+	if err != nil {
+		t.Fatalf("open produced db: %v", err)
+	}
+	defer db.Close()
+
+	var names []string
+	rows, err := db.Query(`SELECT name FROM targets ORDER BY name`)
+	if err != nil {
+		t.Fatalf("query targets: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		names = append(names, n)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate: %v", err)
+	}
+	want := []string{"app1", "app2", "shared"}
+	if len(names) != len(want) {
+		t.Fatalf("targets = %v, want %v", names, want)
+	}
+	for i, n := range want {
+		if names[i] != n {
+			t.Errorf("targets[%d] = %q, want %q", i, names[i], n)
+		}
+	}
+}
+
 // TestCollectUnknownTarget makes the failure loud when the user typos
 // a target name — silently indexing nothing would be worse.
 func TestCollectUnknownTarget(t *testing.T) {

@@ -18,12 +18,16 @@ import (
 func runCollect(args []string) int {
 	fs := flag.NewFlagSet("collect", flag.ContinueOnError)
 	var (
-		bdir    = fs.String("builddir", "", "Meson build directory (required)")
-		proot   = fs.String("project-root", "", "project source root (required)")
-		out     = fs.String("out", "herbarium.hbr", "output .hbr file")
-		strict  = fs.Bool("strict", false, "refuse to pack sources whose mtime is newer than their .o (per herbarium-plan.md Risks)")
-		targets = fs.String("target", "", "comma-separated list of Meson target names to include; empty means all. Skips nm/objdump/map work for other targets — compiler-plane ingest (symbols, cgraph edges) still covers every TU.")
+		bdir   = fs.String("builddir", "", "Meson build directory (required)")
+		proot  = fs.String("project-root", "", "project source root (required)")
+		out    = fs.String("out", "herbarium.hbr", "output .hbr file")
+		strict = fs.Bool("strict", false, "refuse to pack sources whose mtime is newer than their .o (per herbarium-plan.md Risks)")
 	)
+	var targets stringSliceFlag
+	fs.Var(&targets, "target",
+		"Meson target name to include; empty means all. Repeatable, and each occurrence may itself be a comma-separated list "+
+			"(e.g. --target app1 --target app2 or --target app1,app2). Skips nm/objdump/map work for other targets — "+
+			"compiler-plane ingest (symbols, cgraph edges) still covers every TU.")
 	var externalGlobs stringSliceFlag
 	fs.Var(&externalGlobs, "include-external",
 		"Absolute-path glob pointing at headers outside --project-root to pack into external_sources. "+
@@ -53,7 +57,7 @@ func runCollect(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	if err := filterTargets(intro, *targets); err != nil {
+	if err := filterTargets(intro, targets); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
@@ -177,19 +181,18 @@ type stringSliceFlag []string
 func (s *stringSliceFlag) String() string     { return strings.Join(*s, ",") }
 func (s *stringSliceFlag) Set(v string) error { *s = append(*s, v); return nil }
 
-// filterTargets restricts intro.Targets in place to the comma-separated
-// set in spec. Empty spec keeps every target. Unknown names are a hard
-// error (loud rather than silently indexing nothing) — the message lists
-// available target names so the user can correct their typo.
-func filterTargets(intro *mesonintrospect.Introspection, spec string) error {
-	spec = strings.TrimSpace(spec)
-	if spec == "" {
-		return nil
-	}
+// filterTargets restricts intro.Targets in place to the union of every
+// --target occurrence. Each entry may itself be a comma-separated list.
+// Empty specs keep every target. Unknown names are a hard error (loud
+// rather than silently indexing nothing) — the message lists available
+// target names so the user can correct their typo.
+func filterTargets(intro *mesonintrospect.Introspection, specs []string) error {
 	wanted := map[string]bool{}
-	for name := range strings.SplitSeq(spec, ",") {
-		if n := strings.TrimSpace(name); n != "" {
-			wanted[n] = true
+	for _, spec := range specs {
+		for name := range strings.SplitSeq(spec, ",") {
+			if n := strings.TrimSpace(name); n != "" {
+				wanted[n] = true
+			}
 		}
 	}
 	if len(wanted) == 0 {

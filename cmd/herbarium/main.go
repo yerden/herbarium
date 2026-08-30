@@ -14,7 +14,7 @@ var Version = "dev"
 const usage = `herbarium — a GCC-native C code index for AI agents
 
 Usage:
-  herbarium collect --builddir DIR --project-root DIR --out FILE [--strict] [--target NAME,NAME]
+  herbarium collect --builddir DIR --project-root DIR --out FILE [--strict] [--target NAME[,NAME]]...
   herbarium serve   --hbr FILE [--project-root DIR] [--transport stdio|http] [--http-addr ADDR]
   herbarium version
   herbarium help
