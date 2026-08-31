@@ -30,7 +30,7 @@ go build ./cmd/herbarium
 
 ## Prepare the build
 
-Configure the builddir with the diagnostic flags herbarium needs. Preflight will refuse to index a builddir missing any of them and print the exact `meson setup` line to fix it.
+Configure the builddir with the diagnostic flags herbarium needs. Preflight will refuse to index a builddir missing any of them and print the exact `meson setup` line to fix it. For the full walkthrough — optional flags, linker maps, and wiring the server into an MCP client — see [`INSTALL_GUIDE.md`](INSTALL_GUIDE.md).
 
 ```sh
 meson setup builddir \
@@ -126,5 +126,7 @@ testdata/
 
 ## Further reading
 
+- [`INSTALL_GUIDE.md`](INSTALL_GUIDE.md) — step-by-step: build, configure Meson, collect, and serve into an MCP client.
+- [`WHEN_TO_USE.md`](WHEN_TO_USE.md) — which questions are worth routing through the index instead of grep.
 - [`herbarium-plan.md`](herbarium-plan.md) — the design contract. Read this before making non-trivial changes.
 - [`CLAUDE.md`](CLAUDE.md) — orientation for working in this repo.
