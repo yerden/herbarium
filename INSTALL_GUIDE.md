@@ -14,10 +14,8 @@ Go ≥ 1.26. Keep the resulting path — opencode needs an absolute one in step 
 
 ## 2. Configure the Meson build with the dump flags
 
-Herbarium never invokes `meson`, `ninja`, `gcc`, or `ld`: you produce the build,
-it reads what the toolchain already wrote to disk. Preflight refuses to index a
-builddir missing any required dump and reprints the corrected `meson setup`
-line, so a wrong invocation here fails loudly rather than degrading the index.
+Herbarium never invokes `meson`, `ninja`, `gcc`, or `ld` — you produce the
+build, it reads what the toolchain wrote. GCC ≥ 10 required.
 
 ```sh
 cd /path/to/your/c-project
@@ -28,99 +26,55 @@ meson setup builddir \
             -fdump-ipa-devirt -fdump-ipa-icf"
 ```
 
-GCC ≥ 10 is required (`-fcallgraph-info` landed there); preflight checks the
-compiler version reported by Meson. What each flag buys:
+### Required
 
-| Flag | Required for |
-|---|---|
-| `-g -gcolumn-info` | Symbol identity, decl/def locations, signatures, typedef chains, struct field names |
-| `-fcallgraph-info=su,da` | Direct call edges, stack usage, data-area sizes |
-| `-fdump-ipa-cgraph` | Post-IPA callgraph with `address_taken` flags and indirect call site records |
-| `-fdump-ipa-inline` | Inlining decisions |
-| `-fdump-ipa-devirt` | Speculative devirtualization hints for indirect calls |
-| `-fdump-ipa-icf` | Identical-code-folded function groups |
+Preflight refuses the builddir without these and reprints the corrected
+`meson setup` line. All are codegen-inert — `.text` stays byte-identical to a
+stock build, so the index describes the binary you ship.
 
-Transitive header sets come from ninja's consolidated `.ninja_deps`, which the
-build already writes; no extra flag is needed for them.
+| Flag | Buys you | Impact on binary |
+|---|---|---|
+| `-g -gcolumn-info` | Symbol identity, decl/def locations, signatures, typedef chains, struct fields | None — DWARF only, strip as usual |
+| `-fcallgraph-info=su,da` | Direct call edges, stack usage, data-area sizes | None — writes a `.ci` file |
+| `-fdump-ipa-cgraph` | Post-IPA callgraph, `address_taken` flags, indirect call sites | None — writes a dump file |
+| `-fdump-ipa-inline` | Inline decisions | None — writes a dump file |
+| `-fdump-ipa-devirt` | Speculative devirtualization hints | None — writes a dump file |
+| `-fdump-ipa-icf` | ICF-folded function groups | None — writes a dump file |
 
-### One flag deliberately left out
+Header sets come from ninja's `.ninja_deps`; no flag needed.
 
-Every flag above is codegen-inert. `-g -gcolumn-info` only emit DWARF;
-`-fcallgraph-info` and the four `-fdump-ipa-*` only write files next to the
-object. None of them participates in an optimization decision, so `.text` is
-byte-identical to a stock build and the binary can still be stripped for
-shipping. The index therefore describes the binary you actually ship.
+### Optional
 
-There is one more flag herbarium can use, left out of that block on purpose:
-`-fno-inline-functions-called-once`. It is the only flag in the set that
-changes generated code. Its effect is narrow — a `static` function with exactly
-one caller stays out-of-line instead of being inlined on the called-once rule
-alone. Nothing is reordered and no semantics change; it withholds one specific
-inlining decision for one class of function.
+Nothing enforces these. The first two change the binary, so the rule is to
+index the build you actually ship rather than adding flags to please the
+indexer.
 
-**Preflight does not check for it.** The gates are GCC version, objects
-present, `.ci` present, `.cgraph` present, and `.debug_info` present — so this
-is purely your call, and the failure message offers it as an explicit opt-in
-below the recommended `meson setup` line.
+| Flag | Buys you | Impact on binary |
+|---|---|---|
+| `-fno-inline-functions-called-once` | Single-caller statics survive as distinct call-graph nodes | **Changes codegen.** Those helpers stay out-of-line instead of being inlined on the called-once rule. Narrow and predictable — nothing reordered, no semantic change |
+| `-ffunction-sections -fdata-sections` + `-Wl,--gc-sections` | Real reachability: `list_unreachable_symbols`, `describe_symbol`'s reachability field | **Changes the binary.** Dead sections are stripped. Can drop a section reached only from asm or a custom linker script (`__attribute__((used))`, `KEEP()`); default scripts already `KEEP` `.init_array` |
+| `-Wl,-Map=<target>.map` | Exact `winning_object`; disambiguates same-named statics | None — ld writes a text file from what it already knows |
 
-Leaving it out costs you this: single-caller helpers that `-O2` inlined will
-not appear as distinct nodes or edges. That is usually the answer you want,
-since they are not distinct in the binary either. Add the flag when you are
-reading the index as a *source-level* call graph and would rather see those
-helpers than match the shipped artifact byte for byte.
+Notes on the three:
 
-### Two settings that are yours to decide, not herbarium's
+- **Reachability is `nm` on the finished binary**, not a traversal herbarium
+  performs — `symbol_reachability` is a view over `link_resolutions`. Without
+  `--gc-sections` the linker keeps everything, so every symbol resolves and
+  `list_unreachable_symbols` returns nothing. Both halves are needed:
+  `--gc-sections` collects per section, so without `-ffunction-sections` a TU's
+  functions share one `.text` and nothing is stripped.
+- **Without a map**, `winning_object` falls back to a per-`.o` `nm` scan with a
+  strong > weak > local heuristic. Weak-vs-strong stays correct; two same-named
+  statics in two TUs of one target fall back to name lookup and may
+  misattribute.
+- **Maps are matched to targets by filename**, so the map must be named exactly
+  `<target>.map` at the top of the builddir. A global `-Dc_link_args` would
+  point every target at one filename, so this goes in `meson.build`:
 
-The same reasoning governs the two below: index the build you actually care
-about rather than adding flags to please the indexer. Neither is expensive —
-one changes the binary you ship, the other needs an edit to `meson.build`.
-
-- If your real build already dead-strips, index a build that dead-strips.
-- If it does not, adding `--gc-sections` here produces an index that describes
-  a binary you never ship. That is worse than an index with a quiet
-  `list_unreachable_symbols`.
-
-**Dead-strip reachability** — `-ffunction-sections -fdata-sections` in `c_args`,
-`-Wl,--gc-sections` in the link args.
-
-Reachability is not a graph traversal herbarium performs. `symbol_reachability`
-is a view over `link_resolutions`, and `link_resolutions` is built from `nm` on
-the *finished binary* — so "reachable" means the linker actually kept a
-definition. Link without `--gc-sections` and the linker keeps everything it
-pulled in, so every symbol resolves, `list_unreachable_symbols` comes back
-empty, and `describe_symbol`'s reachability field reports `reachable` for
-things nothing calls. The tools do not break; they stop being informative.
-
-Both halves are needed. `--gc-sections` collects at section granularity, so
-without `-ffunction-sections` a TU's functions share one `.text` section and
-nothing is stripped short of the whole TU going unused.
-
-Cost: `-ffunction-sections -fdata-sections` add a section header and
-relocations per function, so objects grow and the link does more work — the
-emitted instructions per function are unchanged, and with `--gc-sections` the
-final binary usually ends up smaller. The thing to actually weigh is
-`--gc-sections` itself: it can strip a section reached only from hand-written
-asm or a custom linker script, which is what `__attribute__((used))` and
-`KEEP()` exist for. Default linker scripts already `KEEP` `.init_array`, so
-constructors survive.
-
-**Linker map files** — `-Wl,-Map=<target>.map` per target.
-
-Build-time cost is negligible: ld writes one text file it already has the
-information for. The friction is purely mechanical — maps are matched to
-targets by filename, so the map must be named exactly `<target>.map` at the
-top of the builddir. A global `-Dc_link_args` would point every target at one
-filename, so this has to go in `meson.build`:
-
-```python
-executable('myapp', myapp_srcs,
-  link_args: ['-Wl,-Map=myapp.map', '-Wl,--gc-sections'])
-```
-
-Without a map, `link_resolutions.winning_object` falls back to a per-`.o` `nm`
-scan with a strong > weak > local heuristic. That still identifies weak-vs-strong
-resolution correctly; the case it cannot resolve is two same-named statics in
-two TUs of the same target, which fall back to name lookup and may misattribute.
+  ```python
+  executable('myapp', myapp_srcs,
+    link_args: ['-Wl,-Map=myapp.map', '-Wl,--gc-sections'])
+  ```
 
 ## 3. Build
 
