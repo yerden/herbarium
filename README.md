@@ -36,10 +36,13 @@ Configure the builddir with the diagnostic flags herbarium needs. Preflight will
 meson setup builddir \
   -Dc_args="-g -gcolumn-info -fcallgraph-info=su,da \
             -fdump-ipa-cgraph -fdump-ipa-inline \
-            -fdump-ipa-devirt -fdump-ipa-icf \
-            -fno-inline-functions-called-once"
+            -fdump-ipa-devirt -fdump-ipa-icf"
 meson compile -C builddir
 ```
+
+Every flag there is codegen-inert — `-g` emits DWARF, the rest only write dump files beside the object — so `.text` stays byte-identical to a stock build and the index describes the binary you actually ship.
+
+One optional flag changes that. `-fno-inline-functions-called-once` keeps single-caller statics out-of-line so they survive as distinct `.cgraph` nodes, at the cost of a narrow but real divergence from the shipped binary. It is not required and preflight does not check for it; add it only if call-graph legibility matters more to you than byte-fidelity.
 
 Linker map files are optional but improve link-plane precision. Enable them per target in `meson.build`:
 

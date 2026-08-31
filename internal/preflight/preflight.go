@@ -18,11 +18,22 @@ import (
 // because `-fcallgraph-info` was introduced in GCC 10.
 const MinGCCMajor = 10
 
-// The exact c_args value the plan recommends. Kept in one place so the
-// preflight report and any future doc generator stay in sync.
+// The c_args herbarium requires, kept in one place so the preflight report
+// and any doc generator stay in sync. Every flag here is codegen-inert —
+// -g emits DWARF, the rest only write dump files beside the object — so a
+// builddir configured this way produces byte-identical .text to a stock
+// build. That matters: the index describes the binary the user actually
+// ships, which is the whole point of indexing compiler output.
 const RecommendedCArgs = "-g -gcolumn-info -fcallgraph-info=su,da " +
-	"-fdump-ipa-cgraph -fdump-ipa-inline -fdump-ipa-devirt -fdump-ipa-icf " +
-	"-fno-inline-functions-called-once"
+	"-fdump-ipa-cgraph -fdump-ipa-inline -fdump-ipa-devirt -fdump-ipa-icf"
+
+// OptionalCallGraphCArgs is deliberately NOT part of RecommendedCArgs and is
+// not gated by any check below. It keeps single-caller statics out-of-line so
+// they survive as distinct .cgraph nodes, which costs a real (if narrow)
+// divergence from the shipped binary — the one flag in herbarium's set that
+// changes codegen. Whether legibility is worth that divergence is the user's
+// call, so the report offers it rather than demanding it.
+const OptionalCallGraphCArgs = "-fno-inline-functions-called-once"
 
 // Finding describes one thing wrong with the builddir. Kind is a stable
 // enum callers can branch on; Detail and FixHint are human-readable.
@@ -34,11 +45,11 @@ type Finding struct {
 
 // Kind values.
 const (
-	KindGCCTooOld    = "gcc_too_old"
-	KindNoTargets    = "no_targets"
-	KindMissingCI    = "missing_ci"
+	KindGCCTooOld     = "gcc_too_old"
+	KindNoTargets     = "no_targets"
+	KindMissingCI     = "missing_ci"
 	KindMissingCgraph = "missing_cgraph"
-	KindNoDebugInfo  = "no_debug_info"
+	KindNoDebugInfo   = "no_debug_info"
 )
 
 // Report is the aggregate result. Ok is true iff Findings is empty.
@@ -147,6 +158,10 @@ func (r *Report) FormatUserMessage(builddir string) string {
 	fmt.Fprintf(&b, "  meson setup %s \\\n", builddir)
 	fmt.Fprintf(&b, "    --buildtype=debugoptimized \\\n")
 	fmt.Fprintf(&b, "    -Dc_args=%q\n", RecommendedCArgs)
+	fmt.Fprintf(&b, "\nEvery flag above is codegen-inert: .text stays byte-identical to a stock build.\n")
+	fmt.Fprintf(&b, "Optionally append %s to keep single-caller statics\n", OptionalCallGraphCArgs)
+	fmt.Fprintf(&b, "out-of-line so they survive as distinct call-graph nodes. It is not required, and it\n")
+	fmt.Fprintf(&b, "is the one flag that changes the generated code.\n")
 	return b.String()
 }
 
