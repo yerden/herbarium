@@ -47,7 +47,16 @@ import (
 // dump was parsed but folded groups were not persisted, so
 // list_icf_groups always returned empty and ICF-folded losers surfaced
 // as false-positive dead symbols in list_unreachable_symbols.
-const SchemaVersion = "6"
+//
+// v7: adds inline_records (every inliner's decisions, from
+// -fsave-optimization-record) and inline_instances (inlined bodies that
+// survived into the object, from DWARF DW_TAG_inlined_subroutine).
+// Before v7 the only inlining fact was inline_decisions, sourced from
+// the .cgraph (inlined) tag — an IPA-stage-only view that misses
+// everything the early inliner folded before IPA ran, with nothing in
+// the index recording that the view was partial. Collect now requires
+// -fsave-optimization-record; a v6-era builddir fails preflight.
+const SchemaVersion = "7"
 
 //go:embed schema.sql
 var schemaSQL string

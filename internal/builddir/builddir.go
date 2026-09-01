@@ -25,6 +25,7 @@ type ObjectArtifacts struct {
 	Inline       string // -fdump-ipa-inline
 	Devirt       string // -fdump-ipa-devirt
 	ICF          string // -fdump-ipa-icf
+	OptRecord    string // -fsave-optimization-record (gzipped JSON)
 	Preprocessed string // .i (only when -save-temps is in effect)
 }
 
@@ -112,6 +113,11 @@ func resolveSidecars(obj string) ObjectArtifacts {
 	// .i: preprocessed source, single fixed filename (with -save-temps)
 	if p := filepath.Join(dir, base+".i"); fileExists(p) {
 		art.Preprocessed = p
+	}
+	// The optimization record is gzipped JSON, not a numbered dump, so
+	// it needs its own glob: <base>.c.opt-record.json.gz on GCC 16.
+	if hits, err := filepath.Glob(filepath.Join(dir, base+"*opt-record.json.gz")); err == nil && len(hits) > 0 {
+		art.OptRecord = hits[0]
 	}
 	// IPA dumps: <base>.NNNi.<pass> — but on GCC 16 we observe an extra
 	// language suffix, so files land as <base>.c.NNNi.<pass>. Glob on the

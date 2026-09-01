@@ -53,11 +53,18 @@ func TestListCallers(t *testing.T) {
 	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	// main → compute is the one cgraph caller in the fixture.
-	if payload.Total != 1 || payload.Callers[0].Caller.Name != "main" {
-		t.Errorf("Callers = %+v, want [main]", payload.Callers)
+	// Two cgraph callers: main (linked into both apps) and
+	// scaled_compute (the always_inline exhibit, never linked).
+	byName := map[string]herbmcp.CallerEdge{}
+	for _, c := range payload.Callers {
+		byName[c.Caller.Name] = c
 	}
-	if len(payload.Callers[0].Targets) == 0 {
+	for _, want := range []string{"main", "scaled_compute"} {
+		if _, ok := byName[want]; !ok {
+			t.Errorf("Callers = %+v, want %q present", payload.Callers, want)
+		}
+	}
+	if len(byName["main"].Targets) == 0 {
 		t.Errorf("main.Targets empty; want ≥1")
 	}
 }

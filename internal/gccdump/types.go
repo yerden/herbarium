@@ -173,3 +173,41 @@ type DevirtHit struct {
 type DevirtDump struct {
 	Hits []DevirtHit
 }
+
+// InlineRecord is one inlining decision from GCC's optimization record
+// (-fsave-optimization-record). Unlike the .cgraph `(inlined)` tag it
+// covers every inliner GCC runs — the early passes that fire before IPA
+// included — and it keeps the rejections along with the compiler's own
+// reason for them.
+type InlineRecord struct {
+	// Pass is GCC's own pass name: "einline" for the early inliner
+	// (which handles always_inline and trivial callees before any IPA
+	// pass runs) and "inline" for the IPA inliner.
+	Pass string
+	// CallerLocalID / CalleeLocalID are cgraph node order numbers, the
+	// same ones .cgraph and .inline use, so they join to a TU's resolve
+	// map without a name lookup. Clone nodes appear under their clone
+	// name ("use_dispatch.constprop") and order.
+	CallerLocalID string
+	CalleeLocalID string
+	CallerName    string
+	CalleeName    string
+	Inlined       bool
+	// Reason is GCC's explanation, populated only when Inlined is false
+	// ("function body not available", "call is cold and code would grow
+	// at least by 11").
+	Reason string
+	// File/Line/Column locate the call site. GCC omits the location on
+	// some records; Line is 0 then.
+	File   string
+	Line   int
+	Column int
+}
+
+// OptRecordDump is the top-level result of parsing one
+// <obj-base>.opt-record.json.gz. Only inline-pass records are kept —
+// the same file also carries vectorizer and unrolling records that no
+// herbarium table consumes.
+type OptRecordDump struct {
+	InlineRecords []InlineRecord
+}

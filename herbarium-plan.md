@@ -65,7 +65,7 @@ Add all of the following to `c_args`. The simplest way is on the `meson setup` c
 ```bash
 meson setup builddir \
   --buildtype=debugoptimized \
-  -Dc_args="-g -gcolumn-info -fcallgraph-info=su,da -fdump-ipa-cgraph -fdump-ipa-inline -fdump-ipa-devirt -fdump-ipa-icf -fno-inline-functions-called-once"
+  -Dc_args="-g -gcolumn-info -fcallgraph-info=su,da -fdump-ipa-cgraph -fdump-ipa-inline -fdump-ipa-devirt -fdump-ipa-icf -fsave-optimization-record -fno-inline-functions-called-once"
 ```
 
 What each flag contributes:
@@ -75,9 +75,10 @@ What each flag contributes:
 | `-g -gcolumn-info` | Symbol identity, decl/def locations, signatures, typedef chains, struct field names |
 | `-fcallgraph-info=su,da` | Direct call edges, stack usage, data-area sizes |
 | `-fdump-ipa-cgraph` | Post-IPA callgraph with `address_taken` flags and indirect call site records |
-| `-fdump-ipa-inline` | Inlining decisions (source vs runtime edge reconciliation) |
+| `-fdump-ipa-inline` | IPA-stage inlining decisions (source vs runtime edge reconciliation) |
 | `-fdump-ipa-devirt` | Speculative devirtualization hints for indirect calls |
 | `-fdump-ipa-icf` | Identical-code-folded function groups |
+| `-fsave-optimization-record` | Every inliner's decisions — including `pass_early_inline`, which folds `always_inline` and trivial callees before any IPA pass runs and therefore leaves no trace in any `-fdump-ipa-*` dump — plus the rejections with GCC's own reason |
 | `-fno-inline-functions-called-once` | Preserves distinct nodes in the post-IPA `.cgraph` for single-caller helpers even when `-O2` still inlines them out of the `.ci` direct-edge view |
 
 Herbarium enumerates each TU's transitive header set by parsing ninja's consolidated `.ninja_deps` binary file, which Meson/ninja generate as part of build tracking. Ninja folds per-object Makefile-style dependency output into this single file and deletes the per-object sidecars; no extra flag is required.
@@ -103,7 +104,7 @@ Herbarium degrades gracefully if maps are missing: `link_resolutions` falls back
 meson compile -C builddir
 ```
 
-Every `.o` will now be accompanied by `<obj>.ci`, `<source>.NNNi.cgraph`, `<source>.NNNi.inline`, `<source>.NNNi.devirt`, `<source>.NNNi.icf`, and a `<obj>.d` dependency file (which Meson/ninja emit unconditionally). Linked executables and shared libraries will exist as usual, with DWARF preserved.
+Every `.o` will now be accompanied by `<obj>.ci`, `<source>.NNNi.cgraph`, `<source>.NNNi.inline`, `<source>.NNNi.devirt`, `<source>.NNNi.icf`, `<source>.opt-record.json.gz`, and a `<obj>.d` dependency file (which Meson/ninja emit unconditionally). Linked executables and shared libraries will exist as usual, with DWARF preserved.
 
 ### Validation before indexing
 
@@ -112,6 +113,7 @@ Every `.o` will now be accompanied by `<obj>.ci`, `<source>.NNNi.cgraph`, `<sour
 - `meson-info/intro-targets.json` (Meson has been configured).
 - `<obj>.ci` for at least one `.o` (`-fcallgraph-info` was supplied).
 - `<source>.NNNi.cgraph` (IPA cgraph dump was supplied).
+- `<source>.opt-record.json.gz` (`-fsave-optimization-record` was supplied). Without it the index sees only IPA-stage inlining, and nothing in the index records that the view is partial.
 - `-g` was in effect (checked by inspecting DWARF sections of a sample `.o`).
 
 The preflight report tells the user exactly which flag is missing and prints the corrected `meson setup` command.
@@ -134,10 +136,11 @@ Files the user's build produces, which herbarium ingests:
 |---|---|---|
 | `-fcallgraph-info=su,da` | `<obj>.ci` | Direct call edges, stack usage, data-area sizes per function |
 | `-fdump-ipa-cgraph` | `<obj>.NNNi.cgraph` | Post-IPA callgraph; `address_taken`, `only_called_directly`, linkage flags; indirect call site list |
-| `-fdump-ipa-inline` | `<obj>.NNNi.inline` | Actual inlining decisions |
+| `-fdump-ipa-inline` | `<obj>.NNNi.inline` | IPA-stage inlining decisions |
+| `-fsave-optimization-record` | `<obj>.opt-record.json.gz` | Gzipped JSON: every pass's inlining decisions, early inliner included, rejections with reasons |
 | `-fdump-ipa-devirt` | `<obj>.NNNi.devirt` | Speculative devirtualization (limited in C, useful when it fires) |
 | `-fdump-ipa-icf` | `<obj>.NNNi.icf` | Identical-code-folded functions (shared linkage address) |
-| `-g -gcolumn-info` | DWARF in `.o` | Symbol identity, decl file/line, def file/line, signatures, typedef chains, struct field names, `DW_TAG_call_site` |
+| `-g -gcolumn-info` | DWARF in `.o` | Symbol identity, decl file/line, def file/line, signatures, typedef chains, struct field names, `DW_TAG_call_site`, `DW_TAG_inlined_subroutine` |
 | Meson/ninja default | `<obj>.d` | Make-format dependency file — transitive header list per TU (no extra flag needed) |
 
 Per `.o` and per linked target, herbarium invokes the following read-only inspectors during `herbarium collect` (never during the user's build, never during `herbarium serve`):
@@ -274,12 +277,45 @@ CREATE TABLE devirt_hints (
   confidence TEXT          -- 'speculative' | 'resolved'
 );
 
--- Inlining record (for source-vs-runtime reconciliation)
+-- Inlining, three planes that answer three different questions.
+-- inline_decisions is the .cgraph per-edge tag: IPA-stage only.
 CREATE TABLE inline_decisions (
   caller_id INTEGER REFERENCES symbols(id),
   callee_id INTEGER REFERENCES symbols(id),
   inlined INTEGER          -- 0/1
 );
+
+-- inline_records is the decision plane, from -fsave-optimization-record:
+-- every pass's verdict, rejections and reasons included. 'einline' rows
+-- come from the early inliner, which runs before IPA and is invisible to
+-- every -fdump-ipa-* dump. A row here is not proof the code survived.
+CREATE TABLE inline_records (
+  caller_id INTEGER REFERENCES symbols(id),
+  callee_id INTEGER REFERENCES symbols(id),
+  pass TEXT NOT NULL,      -- 'einline' | 'inline'
+  inlined INTEGER NOT NULL,-- 0/1
+  reason TEXT,             -- GCC's own words when inlined = 0
+  file TEXT, line INTEGER, column INTEGER,
+  object TEXT
+);
+CREATE INDEX idx_ir_caller ON inline_records(caller_id, inlined);
+CREATE INDEX idx_ir_callee ON inline_records(callee_id, inlined);
+
+-- inline_instances is the outcome plane, from DWARF
+-- DW_TAG_inlined_subroutine: bodies that actually made it into the
+-- object's code, whichever pass put them there. A callee that folds to a
+-- constant after inlining leaves no DIE, so this plane under-reports
+-- rather than over-reports.
+CREATE TABLE inline_instances (
+  callee_id INTEGER REFERENCES symbols(id),
+  caller_id INTEGER REFERENCES symbols(id),
+  parent_callee_id INTEGER REFERENCES symbols(id), -- NULL at depth 1
+  depth INTEGER NOT NULL,
+  file TEXT, line INTEGER, column INTEGER,
+  object TEXT
+);
+CREATE INDEX idx_ii_caller ON inline_instances(caller_id);
+CREATE INDEX idx_ii_callee ON inline_instances(callee_id);
 
 -- Linkage-time truth
 CREATE TABLE link_resolutions (
@@ -379,8 +415,11 @@ When `herbarium serve` is launched with `--project-root <path>`, responses addit
 **`list_linked_callees(caller_usr, target)`** — outgoing calls per `objdump`.
 *Benefit:* symmetric ground truth.
 
-**`describe_inline_decisions(caller_usr)`** — which callees were inlined, which stayed as calls.
-*Benefit:* reconciles the two callgraph views so the agent knows whether a source-level edge exists in the binary.
+**`describe_inline_decisions(caller_usr)`** — what happened to this function's calls, across all three inlining planes: `records` (every pass's decision, rejections and reasons included, from the optimization record), `instances` (the inlined bodies DWARF says survived into the object), `decisions` (the older `.cgraph` per-edge tag, IPA-stage only).
+*Benefit:* reconciles the two callgraph views so the agent knows whether a source-level edge exists in the binary — and, when the planes disagree, says which stage lost it.
+
+**`list_inline_sites(callee_usr)`** — the reverse: everywhere this function's body was inlined into another.
+*Benefit:* answers "where did this helper go?" for a symbol with no runtime callers. A function with instances but no linked callers was inlined everywhere, not dead.
 
 ### Indirect calls and function-pointer dispatch
 
@@ -450,17 +489,18 @@ When `herbarium serve` is launched with `--project-root <path>`, responses addit
 
 - `internal/gccdump/ci.go` — parse `-fcallgraph-info` output.
 - `internal/gccdump/cgraph.go` — parse `-fdump-ipa-cgraph`: functions, flags, direct edges, indirect call sites (count only — no source location; that comes from DWARF in Phase 3), clone attribution to parent USR.
-- `internal/gccdump/inline.go` — parse `-fdump-ipa-inline` for inline decisions (supplementary; `.cgraph`'s `(inlined)` tag on the `Called:` line is the primary source).
+- `internal/gccdump/inline.go` — parse `-fdump-ipa-inline` for inline decisions (supplementary; `.cgraph`'s `(inlined)` tag on the `Called:` line is the primary source). Both are IPA-stage views.
+- `internal/gccdump/optrecord.go` — parse `<obj>.opt-record.json.gz` (`-fsave-optimization-record`). Keeps the records whose pass carries the `inline` optgroup — the same selector `-fopt-info-inline` uses — so the vectorizer records in the same file are dropped without naming them. The two node references in a message are ordered by the message's own wording (`Inlined <callee> into <caller>` vs `not inlinable: <caller> -> <callee>`), so the parser reads the separator rather than assuming a position, and drops any record matching neither: a reversed inline edge would be worse than a missing one.
 - `internal/gccdump/icf.go` — parse `-fdump-ipa-icf` for folded groups (returns empty on fixtures without folding; Phase 8's fixture forces ICF to fire).
 - `internal/gccdump/devirt.go` — parse `-fdump-ipa-devirt` for speculative resolutions. Almost always empty in pure C — `devirt_hints` table stays empty until we see a firing case.
 - `internal/usr/` — USR synthesis per the appendix. Handles GCC clone suffixes (`.constprop.N`, `.isra.N`) by aliasing to the parent's USR and recording the linkage name on the parent.
 - `internal/ingest/` orchestrator: two-phase per-TU aggregation (non-clones first, then clones), cross-TU merge, edge resolution via per-TU local-id → USR maps, cross-TU edge dedup (multi-executable `main` collapses to one identity — see Appendix: Symbols and definitions).
-- Populate `symbols`, `symbol_definitions` (identity + per-def location), `call_edges (source='compiler_cgraph')`, `inline_decisions`. `indirect_call_sites` and `devirt_hints` are populated in Phase 3 (DWARF adds file/line/column that `.cgraph` lacks).
+- Populate `symbols`, `symbol_definitions` (identity + per-def location), `call_edges (source='compiler_cgraph')`, `inline_decisions`, `inline_records`. The optimization record joins by cgraph node order — the same local ids `.cgraph` uses — which is what lets a clone (`use_dispatch.constprop/12`) resolve to its parent's USR; a name lookup could not. `indirect_call_sites` and `devirt_hints` are populated in Phase 3 (DWARF adds file/line/column that `.cgraph` lacks).
 
 ### Phase 3 — DWARF ingest (~3 days)
 
-- `internal/dwarfingest/` — read DWARF from each `.o` via `debug/elf` + `debug/dwarf`. Extracts subprograms with signatures (walking DW_AT_type refs for return + params), struct/typedef/variable DIEs, and `DW_TAG_call_site` entries with source-caller attribution via the inlined-subroutine chain.
-- Populate `symbols.signature` and `symbol_definitions.decl_file/decl_line` (UPSERT — Phase 2 already inserted the identity row; Phase 3 enriches). Owns `indirect_call_sites` insertion with `file`/`line`/`column` resolved via `LineReader.SeekPC(call_return_pc-1)` — GCC 16 puts `DW_AT_call_file/line/column` on the enclosing `DW_TAG_inlined_subroutine`, not on the `DW_TAG_call_site`.
+- `internal/dwarfingest/` — read DWARF from each `.o` via `debug/elf` + `debug/dwarf`. Extracts subprograms with signatures (walking DW_AT_type refs for return + params), struct/typedef/variable DIEs, `DW_TAG_call_site` entries with source-caller attribution via the inlined-subroutine chain, and `DW_TAG_inlined_subroutine` entries as inline instances in their own right (callee via `DW_AT_abstract_origin`, caller and nesting depth from the DIE stack, call site from `DW_AT_call_file/line/column`).
+- Populate `symbols.signature` and `symbol_definitions.decl_file/decl_line` (UPSERT — Phase 2 already inserted the identity row; Phase 3 enriches). Owns `indirect_call_sites` insertion with `file`/`line`/`column` resolved via `LineReader.SeekPC(call_return_pc-1)` — GCC 16 puts `DW_AT_call_file/line/column` on the enclosing `DW_TAG_inlined_subroutine`, not on the `DW_TAG_call_site`. Also owns `inline_instances`: the same `DW_TAG_inlined_subroutine` DIEs, read as facts rather than as traversal, which is the only plane that sees the early inliner's work.
 - Struct field DIEs are parsed (name + rendered type per member) but not persisted — the plan schema has no fields table currently. Add one when a downstream tool needs to query by struct field.
 - Typedef DIEs are captured with their target type as a rendered string; no full canonicalization to underlying base types (a `size_t` stays `size_t` rather than becoming `unsigned long`).
 - Signature rendering keeps C's three empty-ish parameter lists apart, since `callee_type` is matched against `symbols.signature` by equality: `(void)` for a prototyped no-argument function, `()` for a non-prototyped declaration (`DW_TAG_unspecified_parameters` without `DW_AT_prototyped`, whose arguments are unchecked and default-promoted), and a trailing `, ...` for a genuine variadic. `symbols.signature` and a fn-pointer's rendering share one code path so the two always agree.
@@ -495,7 +535,7 @@ When `herbarium serve` is launched with `--project-root <path>`, responses addit
 - Snippet extraction on demand from the blob store for every location-returning tool (±5 lines, uniform `Location` shape carrying `path`, `line`, `column`, `blob_hash`, `snippet`, and `absolute_path` when `--project-root` is set).
 - `--project-root` option on `serve` enables `verify_source` live-hashing and `list_source_drift`; adds `absolute_path` to responses. Without it, responses are self-contained against the .hbr.
 - `describe_schema` returns embedded schema + closed-vocabulary enum glossary + canonical join recipes; `sql_query` uses the read-only driver mode (`mode=ro + query_only(1)`) so writes are rejected at the SQLite layer with a "readonly" error rather than by application-side parsing.
-- Known gaps left for later work (documented in the tool descriptions themselves): `list_entry_points` doesn't yet classify constructor-attributed or `.init_array` entries; `resolve_indirect_call` still falls back to the full address-taken pool for sites where neither `DW_AT_call_target` nor a call-instruction relocation names a typed target (computed pointers, non-x86-64 objects).
+- Known gaps left for later work (documented in the tool descriptions themselves): `list_entry_points` doesn't yet classify constructor-attributed or `.init_array` entries; `resolve_indirect_call` still falls back to the full address-taken pool for sites where neither `DW_AT_call_target` nor a call-instruction relocation names a typed target (computed pointers, non-x86-64 objects). On inlining, no single plane is complete: `inline_records` misses the source location on some records and cannot say whether the inlined code survived, and `inline_instances` misses any callee whose copy folded to a constant afterwards. They are kept separate rather than merged because the disagreement is the signal.
 
 ### Phase 7 — Incremental re-ingest — **deferred**
 
@@ -515,8 +555,9 @@ Skipped by user decision after Phase 6. `herbarium collect` always writes a fres
   - A pair of syntactically-different but semantically-identical helpers (`lib/icf_pair.c`) that GCC's `-fipa-icf` folds (dump reports `Equal symbols: 1` + `<name>.localalias` node).
   - A dead-stripped symbol (`never_called`) under `-ffunction-sections -fdata-sections -Wl,--gc-sections` (`reachable=0` after linking).
   - A GCC clone (`use_dispatch.constprop.0`) recorded in `symbols.linkage_names`.
+  - An early-inlined helper (`scale_by_two`, `always_inline`, folded into `scaled_compute` in `lib/shared_utils.c`) — the pre-IPA fold that appears in `inline_records`/`inline_instances` and in neither `inline_decisions` nor any `-fdump-ipa-*` dump.
 - Golden-file tests for each ingest module land in the module's own `_test.go` under `internal/gccdump/`, `internal/dwarfingest/`, `internal/linkplane/`, and `internal/ninjadeps/`. Sample dumps live under `testdata/samples/gcc-<version>/`.
-- End-to-end coverage: `TestE2EFixtureContract` in `internal/mcp/e2e_test.go` boots an in-process MCP client against a freshly-collected `.hbr` and walks 12 tools, asserting the fixture's full contract (multi-def hook, clone linkage names, source-vs-runtime call graph asymmetry from inlining, dead-strip + inline reachability=0, undefined externals, per-target link resolution).
+- End-to-end coverage: `TestE2EFixtureContract` in `internal/mcp/e2e_test.go` boots an in-process MCP client against a freshly-collected `.hbr` and walks 15 tools, asserting the fixture's full contract (multi-def hook, clone linkage names, source-vs-runtime call graph asymmetry from inlining, all three inlining planes including the early-inline fold, dead-strip + inline reachability=0, undefined externals, per-target link resolution).
 
 **Total estimated effort:** ~3.5 weeks of focused work.
 
@@ -647,7 +688,7 @@ A single external symbol may have **multiple definitions** in an indexed project
 
 ### GCC-generated clones
 
-GCC's IPA passes may emit specialized variants of a source function: `<name>.constprop.<N>` (constant-propagated), `<name>.isra.<N>` (interprocedural scalar-replacement of aggregates), `<name>.part.<N>` (partial inlining split), and similar. These variants appear as distinct entries in `.cgraph`, `.inline`, and in the linked binary's symbol table. They share the source identity of their parent — same file, same source line, same signature — but have distinct linkage names and distinct runtime addresses.
+GCC's IPA passes may emit specialized variants of a source function: `<name>.constprop.<N>` (constant-propagated), `<name>.isra.<N>` (interprocedural scalar-replacement of aggregates), `<name>.part.<N>` (partial inlining split), and similar. These variants appear as distinct entries in `.cgraph`, `.inline`, the optimization record, and in the linked binary's symbol table. They share the source identity of their parent — same file, same source line, same signature — but have distinct linkage names and distinct runtime addresses.
 
 **Rule:** clones alias to the parent's USR. There is exactly one row in `symbols` per source function regardless of how many clones the optimizer produces. The `symbols.linkage_names` column carries the JSON array of every linkage name that resolves to this USR at link time (`["use_dispatch", "use_dispatch.constprop.0"]`), so objdump/nm-based symbolication remains lossless.
 

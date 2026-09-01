@@ -20,6 +20,7 @@ type tuData struct {
 	inline *gccdump.InlineDump
 	icf    *gccdump.ICFDump
 	devirt *gccdump.DevirtDump
+	optRec *gccdump.OptRecordDump
 }
 
 // symbolRec is the identity + aggregated attributes for one USR. defs
@@ -124,6 +125,12 @@ func Compiler(db *sql.DB, bd *builddir.BuildDir, pr *PathResolver) (Summary, err
 		sum.InlineDecisions++
 	}
 
+	nRec, err := insertInlineRecords(tx, tus, resolves, idByUSR, bd.Root, pr)
+	if err != nil {
+		return Summary{}, err
+	}
+	sum.InlineRecords = nRec
+
 	nICF, err := insertICFGroups(tx, tus, resolves, idByUSR, bd.Root)
 	if err != nil {
 		return Summary{}, err
@@ -160,6 +167,63 @@ func buildObjectToSource(tus []*tuData, builddirRoot string, pr *PathResolver) m
 		out[filepath.ToSlash(rel)] = src.Rel
 	}
 	return out
+}
+
+// insertInlineRecords writes the optimization record's decisions. The
+// join is by cgraph node order, the same local ids .cgraph uses, which
+// is what lets a clone ("use_dispatch.constprop/12") resolve to its
+// parent's USR; a name lookup could not. A record whose either end does
+// not resolve is dropped rather than guessed at.
+func insertInlineRecords(tx *sql.Tx, tus []*tuData, resolves map[string]perTUResolve, idByUSR map[string]int64, builddirRoot string, pr *PathResolver) (int, error) {
+	stmt, err := tx.Prepare(`
+		INSERT INTO inline_records
+		  (caller_id, callee_id, pass, inlined, reason, file, line, column, object)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return 0, fmt.Errorf("ingest: prepare inline_records: %w", err)
+	}
+	defer stmt.Close()
+
+	written := 0
+	for _, tu := range tus {
+		if tu.optRec == nil || len(tu.optRec.InlineRecords) == 0 {
+			continue
+		}
+		res := resolves[tu.object]
+		if res == nil {
+			continue
+		}
+		objRel := tu.object
+		if rel, err := filepath.Rel(builddirRoot, tu.object); err == nil {
+			objRel = rel
+		}
+		for _, r := range tu.optRec.InlineRecords {
+			callerID, ok := idByUSR[res[r.CallerLocalID]]
+			if !ok {
+				continue
+			}
+			calleeID, ok := idByUSR[res[r.CalleeLocalID]]
+			if !ok {
+				continue
+			}
+			inlined := 0
+			if r.Inlined {
+				inlined = 1
+			}
+			fileRel := ""
+			if r.File != "" {
+				fileRel = pr.ToProjectRelative(r.File).Rel
+			}
+			if _, err := stmt.Exec(
+				callerID, calleeID, r.Pass, inlined, r.Reason,
+				fileRel, r.Line, r.Column, objRel,
+			); err != nil {
+				return 0, fmt.Errorf("ingest: insert inline_record: %w", err)
+			}
+			written++
+		}
+	}
+	return written, nil
 }
 
 // insertICFGroups walks each TU's parsed .icf dump and writes one
@@ -272,7 +336,11 @@ type Summary struct {
 	Symbols         int
 	CallEdges       int
 	InlineDecisions int
-	ICFGroups       int
+	// InlineRecords counts rows from the optimization record — every
+	// pass's decisions, rejections included. Always ≥ InlineDecisions
+	// on a build that has both.
+	InlineRecords int
+	ICFGroups     int
 	// idByUSR is exposed so the DWARF pass can look up symbol row ids
 	// by USR to UPSERT signatures and enrich decl locations.
 	IDByUSR map[string]int64
@@ -311,6 +379,11 @@ func parseTU(art builddir.ObjectArtifacts) (*tuData, error) {
 	}
 	if art.Devirt != "" {
 		if tu.devirt, err = gccdump.ParseDevirtFile(art.Devirt); err != nil {
+			return nil, err
+		}
+	}
+	if art.OptRecord != "" {
+		if tu.optRec, err = gccdump.ParseOptRecordFile(art.OptRecord); err != nil {
 			return nil, err
 		}
 	}

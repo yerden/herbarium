@@ -44,13 +44,14 @@ Tools: `list_indirect_call_sites`, `resolve_indirect_call`, `list_address_taken_
 Grep finds the address-take but not the resolution set.
 
 ### Compiler decisions
-- "Was this call inlined?"
+- "Was this call inlined — by which pass, and if not, why not?"
+- "Where did this helper's body end up? It has no callers in the binary."
 - "Did GCC specialize / clone this function (e.g. `foo.constprop.0`)?"
 - "Any devirtualization hints here?"
 
-Tools: `describe_inline_decisions`, `list_devirt_hints`.
+Tools: `describe_inline_decisions`, `list_inline_sites`, `list_devirt_hints`.
 
-These facts exist only in GCC's IPA dumps; there is nothing in source to grep for.
+These facts exist only in the compiler's own records — its optimization record, its IPA dumps, and DWARF. There is nothing in source to grep for.
 
 ### Multi-definition or ambiguous symbols
 - "How many definitions of `init` exist across TUs?"

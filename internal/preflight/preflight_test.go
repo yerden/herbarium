@@ -77,6 +77,39 @@ func TestCheckMissingCI(t *testing.T) {
 	}
 }
 
+// A builddir from before -fsave-optimization-record was required must
+// fail loudly rather than silently produce an index with no pre-IPA
+// inlining facts in it.
+func TestCheckMissingOptRecord(t *testing.T) {
+	intro, err := mesonintrospect.Load(fixtureBuilddir(t))
+	if err != nil {
+		t.Fatalf("mesonintrospect.Load: %v", err)
+	}
+	bd, err := builddir.Crawl(fixtureBuilddir(t))
+	if err != nil {
+		t.Fatalf("builddir.Crawl: %v", err)
+	}
+	for i := range bd.Objects {
+		bd.Objects[i].OptRecord = ""
+	}
+	r := preflight.Check(intro, bd)
+	if r.Ok {
+		t.Fatal("expected Ok=false with missing optimization records, got true")
+	}
+	var found bool
+	for _, f := range r.Findings {
+		if f.Kind == preflight.KindMissingOptRec {
+			found = true
+			if !strings.Contains(f.FixHint, "-fsave-optimization-record") {
+				t.Errorf("fix hint does not name the flag: %q", f.FixHint)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected KindMissingOptRec finding; got %+v", r.Findings)
+	}
+}
+
 func TestCheckNoObjects(t *testing.T) {
 	intro := &mesonintrospect.Introspection{
 		MesonVersion: "1.12.0",

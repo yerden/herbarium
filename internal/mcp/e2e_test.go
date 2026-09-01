@@ -27,6 +27,9 @@ import (
 //   - Per-target link resolution (hook resolves differently in app1 vs app2).
 //   - Reachability: dead-strip (never_called), inlined-away (use_dispatch).
 //   - Undefined externals (printf).
+//   - Inlining across all three planes: the .cgraph tag, GCC's own
+//     optimization record (which alone sees the early inliner folding
+//     scale_by_two), and the DWARF bodies that survived into the object.
 func TestE2EFixtureContract(t *testing.T) {
 	client := startClient(t, fixtureHBR(t))
 	ctx := context.Background()
@@ -148,6 +151,58 @@ func TestE2EFixtureContract(t *testing.T) {
 		}
 		if !sawInlined {
 			t.Errorf("no inlined decision for use_dispatch under main: %+v", resp.Decisions)
+		}
+		// The same call was weighed twice: the early inliner declined it
+		// (with a reason), then the IPA inliner took it.
+		byPass := map[string]herbmcp.InlineRecordRow{}
+		for _, r := range resp.Records {
+			if r.Callee.Name == "use_dispatch" {
+				byPass[r.Pass] = r
+			}
+		}
+		if e, ok := byPass["einline"]; !ok || e.Inlined || e.Reason == "" {
+			t.Errorf("early pass record for use_dispatch = %+v, want a rejection with a reason", e)
+		}
+		if i, ok := byPass["inline"]; !ok || !i.Inlined {
+			t.Errorf("IPA pass record for use_dispatch = %+v, want inlined", i)
+		}
+		// And the body is really there in main's code.
+		var sawBody bool
+		for _, inst := range resp.Instances {
+			if inst.Callee.Name == "use_dispatch" && inst.Depth == 1 {
+				sawBody = true
+			}
+		}
+		if !sawBody {
+			t.Errorf("no surviving inlined body for use_dispatch in main: %+v", resp.Instances)
+		}
+	}
+
+	// --- The early inliner's fold, which no IPA dump can report ---
+	{
+		usr := symbolUSR(t, client, "scale_by_two")
+		var resp herbmcp.ListInlineSitesResponse
+		call(t, client, ctx, "list_inline_sites", map[string]any{"callee_usr": usr}, &resp)
+		if len(resp.Instances) != 1 || resp.Instances[0].Caller.Name != "scaled_compute" {
+			t.Fatalf("list_inline_sites(scale_by_two) = %+v, want one fold into scaled_compute", resp.Instances)
+		}
+		var sawEarly bool
+		for _, r := range resp.Records {
+			if r.Pass == "einline" && r.Inlined {
+				sawEarly = true
+			}
+		}
+		if !sawEarly {
+			t.Errorf("no einline success for scale_by_two: %+v", resp.Records)
+		}
+		// It never reaches the IPA inliner, so the .cgraph plane is silent.
+		var dresp herbmcp.DescribeInlineDecisionsResponse
+		call(t, client, ctx, "describe_inline_decisions",
+			map[string]any{"caller_usr": symbolUSR(t, client, "scaled_compute")}, &dresp)
+		for _, d := range dresp.Decisions {
+			if d.Callee.Name == "scale_by_two" && d.Inlined {
+				t.Error("scale_by_two shows up as an IPA inline decision; the early inliner had already folded it")
+			}
 		}
 	}
 

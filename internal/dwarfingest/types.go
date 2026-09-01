@@ -19,9 +19,12 @@ type Info struct {
 	CUFile      string // DW_AT_name on the CU — the .c source being compiled
 	Subprograms []Subprogram
 	CallSites   []CallSite
-	Structs     []StructInfo
-	Typedefs    []TypedefInfo
-	Variables   []VariableInfo
+	// InlineInstances is what the inliner actually left in this object's
+	// code, whichever pass performed the fold.
+	InlineInstances []InlineInstance
+	Structs         []StructInfo
+	Typedefs        []TypedefInfo
+	Variables       []VariableInfo
 }
 
 // Subprogram is one DW_TAG_subprogram DIE. A given DWARF may carry both
@@ -72,6 +75,31 @@ type CallSite struct {
 	returnPC     uint64
 	callTarget   []byte       // raw DW_AT_call_target expression
 	enclosingOff dwarf.Offset // DIE offset of the physically enclosing subprogram
+}
+
+// InlineInstance is one DW_TAG_inlined_subroutine DIE: a callee whose
+// body the compiler copied into another function and whose code survived
+// into this object. It is the only route to the early inliner's work —
+// always_inline and trivial static callees are folded before any IPA
+// pass runs, so no IPA dump mentions them — but it is an outcome, not a
+// decision: a callee that folds away to nothing after inlining leaves no
+// DIE at all.
+type InlineInstance struct {
+	// CalleeName comes from DW_AT_abstract_origin and is the source
+	// function's name, not a clone's: a constprop clone inlined back
+	// into its single caller points at the original subprogram DIE.
+	CalleeName string
+	// CallerName is the physical frame the body landed in — the
+	// innermost enclosing DW_TAG_subprogram.
+	CallerName string
+	// ParentCalleeName is the inlined body immediately containing this
+	// one, empty at Depth 1. GCC nests these when an inlined callee had
+	// its own calls inlined.
+	ParentCalleeName string
+	Depth            int
+	File             string // DW_AT_call_file, resolved via the CU file table
+	Line             int    // DW_AT_call_line — where the call was written
+	Column           int
 }
 
 // StructInfo is one DW_TAG_structure_type DIE. Anonymous structs get

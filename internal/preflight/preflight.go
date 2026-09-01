@@ -25,7 +25,8 @@ const MinGCCMajor = 10
 // build. That matters: the index describes the binary the user actually
 // ships, which is the whole point of indexing compiler output.
 const RecommendedCArgs = "-g -gcolumn-info -fcallgraph-info=su,da " +
-	"-fdump-ipa-cgraph -fdump-ipa-inline -fdump-ipa-devirt -fdump-ipa-icf"
+	"-fdump-ipa-cgraph -fdump-ipa-inline -fdump-ipa-devirt -fdump-ipa-icf " +
+	"-fsave-optimization-record"
 
 // OptionalCallGraphCArgs is deliberately NOT part of RecommendedCArgs and is
 // not gated by any check below. It keeps single-caller statics out-of-line so
@@ -50,6 +51,7 @@ const (
 	KindMissingCI     = "missing_ci"
 	KindMissingCgraph = "missing_cgraph"
 	KindNoDebugInfo   = "no_debug_info"
+	KindMissingOptRec = "missing_opt_record"
 )
 
 // Report is the aggregate result. Ok is true iff Findings is empty.
@@ -94,13 +96,16 @@ func Check(intro *mesonintrospect.Introspection, bd *builddir.BuildDir) *Report 
 	// A single missing dump kind is enough to conclude the flag was not
 	// supplied globally; scan every .o so the report can name each
 	// affected TU if the user later wants that detail.
-	var missingCI, missingCgraph []string
+	var missingCI, missingCgraph, missingOptRec []string
 	for _, o := range bd.Objects {
 		if o.CI == "" {
 			missingCI = append(missingCI, o.Object)
 		}
 		if o.Cgraph == "" {
 			missingCgraph = append(missingCgraph, o.Object)
+		}
+		if o.OptRecord == "" {
+			missingOptRec = append(missingOptRec, o.Object)
 		}
 	}
 	if len(missingCI) > 0 {
@@ -115,6 +120,17 @@ func Check(intro *mesonintrospect.Introspection, bd *builddir.BuildDir) *Report 
 			Kind:    KindMissingCgraph,
 			Detail:  fmt.Sprintf(".cgraph dump missing for %d/%d objects (sample: %s)", len(missingCgraph), len(bd.Objects), missingCgraph[0]),
 			FixHint: "add `-fdump-ipa-cgraph` (and the other -fdump-ipa-* flags) to c_args and rebuild",
+		})
+	}
+	// Without the optimization record the index sees only the IPA
+	// inliner's decisions: everything the early inliner folded (every
+	// always_inline, every trivial static) is missing from the compiler
+	// plane with no trace that it is missing.
+	if len(missingOptRec) > 0 {
+		r.Findings = append(r.Findings, Finding{
+			Kind:    KindMissingOptRec,
+			Detail:  fmt.Sprintf("optimization record missing for %d/%d objects (sample: %s)", len(missingOptRec), len(bd.Objects), missingOptRec[0]),
+			FixHint: "add `-fsave-optimization-record` to c_args and rebuild — without it, pre-IPA inlining is invisible",
 		})
 	}
 

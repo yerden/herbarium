@@ -23,7 +23,8 @@ meson setup builddir \
   --buildtype=debugoptimized \
   -Dc_args="-g -gcolumn-info -fcallgraph-info=su,da \
             -fdump-ipa-cgraph -fdump-ipa-inline \
-            -fdump-ipa-devirt -fdump-ipa-icf"
+            -fdump-ipa-devirt -fdump-ipa-icf \
+            -fsave-optimization-record"
 ```
 
 ### Required
@@ -40,6 +41,7 @@ stock build, so the index describes the binary you ship.
 | `-fdump-ipa-inline` | Inline decisions | None — writes a dump file |
 | `-fdump-ipa-devirt` | Speculative devirtualization hints | None — writes a dump file |
 | `-fdump-ipa-icf` | ICF-folded function groups | None — writes a dump file |
+| `-fsave-optimization-record` | Every inliner's decisions, rejections and reasons included — the only route to the early inliner, which folds `always_inline` and trivial callees before any IPA pass runs | None — writes a gzipped JSON file |
 
 Header sets come from ninja's `.ninja_deps`; no flag needed.
 
@@ -126,7 +128,7 @@ herbarium preflight failed for builddir
 herbarium serve --hbr myproject.hbr --check
 ```
 
-Opens the `.hbr` read-only, registers all 27 tools, prints
+Opens the `.hbr` read-only, registers all 28 tools, prints
 `herbarium serve --check: … opens (schema N)`, and exits. This catches a schema
 mismatch between binary and artifact before opencode sees a transport that dies
 on startup.

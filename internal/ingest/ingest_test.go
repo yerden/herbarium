@@ -424,6 +424,123 @@ func TestCompilerIngestFixture(t *testing.T) {
 			t.Errorf("FTS lookup for char (in main's signature) returned %d rows", n)
 		}
 	})
+
+	// The early inliner folds scale_by_two into scaled_compute before any
+	// IPA pass runs, so this fact exists only in the optimization record
+	// and in DWARF — inline_decisions cannot carry it.
+	t.Run("early inline is recorded", func(t *testing.T) {
+		var pass string
+		var inlined int
+		if err := db.QueryRow(`
+			SELECT r.pass, r.inlined FROM inline_records r
+			JOIN symbols cr ON cr.id = r.caller_id
+			JOIN symbols ce ON ce.id = r.callee_id
+			WHERE cr.name = 'scaled_compute' AND ce.name = 'scale_by_two'`,
+		).Scan(&pass, &inlined); err != nil {
+			t.Fatalf("inline_records for scale_by_two: %v", err)
+		}
+		if pass != "einline" || inlined != 1 {
+			t.Errorf("pass/inlined = %q/%d, want einline/1", pass, inlined)
+		}
+
+		var n int
+		if err := db.QueryRow(`
+			SELECT COUNT(*) FROM inline_decisions d
+			JOIN symbols ce ON ce.id = d.callee_id
+			WHERE ce.name = 'scale_by_two' AND d.inlined = 1`).Scan(&n); err != nil {
+			t.Fatalf("inline_decisions: %v", err)
+		}
+		if n != 0 {
+			t.Errorf("inline_decisions rows for scale_by_two = %d, want 0 (IPA never saw it)", n)
+		}
+
+		var caller, file string
+		var line, depth int
+		if err := db.QueryRow(`
+			SELECT cr.name, i.file, i.line, i.depth FROM inline_instances i
+			JOIN symbols cr ON cr.id = i.caller_id
+			JOIN symbols ce ON ce.id = i.callee_id
+			WHERE ce.name = 'scale_by_two'`,
+		).Scan(&caller, &file, &line, &depth); err != nil {
+			t.Fatalf("inline_instances for scale_by_two: %v", err)
+		}
+		if caller != "scaled_compute" || file != "lib/shared_utils.c" || depth != 1 {
+			t.Errorf("instance = %s/%s:%d depth %d, want scaled_compute/lib/shared_utils.c depth 1", caller, file, line, depth)
+		}
+	})
+
+	// A rejection carries GCC's own reason, and the same call can be
+	// weighed twice — once before IPA analysis and once after.
+	t.Run("rejections keep their reason", func(t *testing.T) {
+		rows, err := db.Query(`
+			SELECT r.pass, r.reason FROM inline_records r
+			JOIN symbols cr ON cr.id = r.caller_id
+			JOIN symbols ce ON ce.id = r.callee_id
+			WHERE cr.name = 'compute' AND ce.name = 'add_ints' AND r.inlined = 0
+			ORDER BY r.pass`)
+		if err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		defer rows.Close()
+		byPass := map[string]string{}
+		for rows.Next() {
+			var pass, reason string
+			if err := rows.Scan(&pass, &reason); err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			byPass[pass] = reason
+		}
+		for _, pass := range []string{"einline", "inline"} {
+			if byPass[pass] != "function body can be overwritten at link time" {
+				t.Errorf("%s reason = %q", pass, byPass[pass])
+			}
+		}
+	})
+
+	// The IPA inliner names clones; the row must land on the parent USR.
+	t.Run("clone record resolves to its parent", func(t *testing.T) {
+		var n int
+		if err := db.QueryRow(`
+			SELECT COUNT(*) FROM inline_records r
+			JOIN symbols cr ON cr.id = r.caller_id
+			JOIN symbols ce ON ce.id = r.callee_id
+			WHERE cr.name = 'main' AND ce.name = 'use_dispatch'
+			  AND r.pass = 'inline' AND r.inlined = 1`).Scan(&n); err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if n != 1 {
+			t.Errorf("use_dispatch.constprop -> main rows = %d, want 1", n)
+		}
+	})
+
+	// icf_add_one is inlined into icf_bump_by_one and then folded away —
+	// a decision with no surviving body. The two planes must disagree
+	// here; that disagreement is the point of keeping both.
+	t.Run("decision without a surviving body", func(t *testing.T) {
+		var decided, instances int
+		if err := db.QueryRow(`
+			SELECT COUNT(*) FROM inline_records r
+			JOIN symbols cr ON cr.id = r.caller_id
+			JOIN symbols ce ON ce.id = r.callee_id
+			WHERE cr.name = 'icf_bump_by_one' AND ce.name = 'icf_add_one' AND r.inlined = 1`,
+		).Scan(&decided); err != nil {
+			t.Fatalf("records: %v", err)
+		}
+		if decided == 0 {
+			t.Error("no inline_records row for icf_add_one -> icf_bump_by_one")
+		}
+		if err := db.QueryRow(`
+			SELECT COUNT(*) FROM inline_instances i
+			JOIN symbols cr ON cr.id = i.caller_id
+			JOIN symbols ce ON ce.id = i.callee_id
+			WHERE cr.name = 'icf_bump_by_one' AND ce.name = 'icf_add_one'`,
+		).Scan(&instances); err != nil {
+			t.Fatalf("instances: %v", err)
+		}
+		if instances != 0 {
+			t.Errorf("inline_instances for icf_add_one = %d, want 0 (the copy folded away)", instances)
+		}
+	})
 }
 
 func TestPathResolver(t *testing.T) {

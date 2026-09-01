@@ -21,6 +21,10 @@ import (
 //   - indirect_call_sites ← DW_TAG_call_site without DW_AT_call_origin,
 //     with file/line/column resolved via the CU's line table, plus the
 //     callee_type/field_hint dwarfingest recovered for the site
+//   - inline_instances ← DW_TAG_inlined_subroutine, the inlined bodies
+//     that survived into the object's code. This is the only plane that
+//     sees the early inliner's work; the .cgraph and .inline dumps are
+//     written after it has already run.
 //
 // Runs AFTER Compiler pass — depends on the symbol/definition rows the
 // Compiler pass populated.
@@ -53,6 +57,15 @@ func DWARF(db *sql.DB, bd *builddir.BuildDir, pr *PathResolver, idByUSR map[stri
 		return DwarfSummary{}, fmt.Errorf("ingest/dwarf: prepare indirect insert: %w", err)
 	}
 	defer indirectStmt.Close()
+
+	inlineStmt, err := tx.Prepare(`
+		INSERT INTO inline_instances
+		  (callee_id, caller_id, parent_callee_id, depth, file, line, column, object)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return DwarfSummary{}, fmt.Errorf("ingest/dwarf: prepare inline_instances insert: %w", err)
+	}
+	defer inlineStmt.Close()
 
 	var sum DwarfSummary
 	// Sort objects deterministically for reproducible signatures on
@@ -114,6 +127,36 @@ func DWARF(db *sql.DB, bd *builddir.BuildDir, pr *PathResolver, idByUSR map[stri
 			}
 			sum.IndirectSites++
 		}
+
+		// Inlined bodies present in this object.
+		objRel := art.Object
+		if rel, err := filepath.Rel(bd.Root, art.Object); err == nil {
+			objRel = rel
+		}
+		for _, ii := range info.InlineInstances {
+			calleeID := resolveSymbolID(ii.CalleeName, tuSourcePath, idByUSR)
+			callerID := resolveSymbolID(ii.CallerName, tuSourcePath, idByUSR)
+			if calleeID == 0 || callerID == 0 {
+				continue
+			}
+			// A nested instance whose parent doesn't resolve still
+			// records the fold and its depth — only the parent link is
+			// lost, and NULL says so.
+			var parentID any
+			if ii.ParentCalleeName != "" {
+				if id := resolveSymbolID(ii.ParentCalleeName, tuSourcePath, idByUSR); id != 0 {
+					parentID = id
+				}
+			}
+			fileRel := pr.ToProjectRelative(ii.File).Rel
+			if _, err := inlineStmt.Exec(
+				calleeID, callerID, parentID, ii.Depth,
+				fileRel, ii.Line, ii.Column, objRel,
+			); err != nil {
+				return DwarfSummary{}, fmt.Errorf("ingest/dwarf: inline_instances insert: %w", err)
+			}
+			sum.InlineInstances++
+		}
 	}
 
 	// Rebuild the FTS index once after all signature updates. FTS5
@@ -134,9 +177,10 @@ func DWARF(db *sql.DB, bd *builddir.BuildDir, pr *PathResolver, idByUSR map[stri
 // DwarfSummary counts what the DWARF pass wrote. Displayed after
 // `herbarium collect` so users see whether DWARF enrichment fired.
 type DwarfSummary struct {
-	Signatures    int
-	DeclLocations int
-	IndirectSites int
+	Signatures      int
+	DeclLocations   int
+	IndirectSites   int
+	InlineInstances int
 }
 
 // resolveSymbolID tries the external USR form first, then the static

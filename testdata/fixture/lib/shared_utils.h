@@ -6,6 +6,7 @@ int mul_ints(int a, int b);
 int compute(int a, int b);
 int hook(int x);
 void never_called(void);
+int scaled_compute(int a, int b);
 
 /* Two functions written differently in source but semantically identical
    at the gimple level after -O2 lowering, so GCC's -fipa-icf pass folds

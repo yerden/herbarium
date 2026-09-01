@@ -14,3 +14,15 @@ int compute(int a, int b) {
 
 void never_called(void) {
 }
+
+/* always_inline is handled by GCC's early inliner, which fires before any
+   IPA pass runs — so this fold is invisible to the .inline dump and shows
+   up only in the optimization record and in DWARF. Nothing calls
+   scaled_compute, so the fold also leaves no trace in the linked binary. */
+static inline __attribute__((always_inline)) int scale_by_two(int v) {
+    return v * 2;
+}
+
+int scaled_compute(int a, int b) {
+    return scale_by_two(compute(a, b));
+}

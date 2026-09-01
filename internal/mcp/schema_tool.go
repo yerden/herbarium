@@ -93,6 +93,11 @@ var SchemaEnums = []SchemaEnum{
 		Values: []string{"speculative", "resolved"},
 	},
 	{
+		Column: "inline_records.pass",
+		Values: []string{"einline", "inline"},
+		Notes:  "einline is GCC's early inliner — it runs before any IPA pass and is the only pass that folds always_inline, so its rows have no counterpart in inline_decisions or the .cgraph dump. inline is the IPA inliner. The same call can appear under both passes.",
+	},
+	{
 		Column: "link_resolutions.linkage_kind",
 		Values: []string{"strong", "weak", "unique_global", "common"},
 	},
@@ -140,6 +145,25 @@ JOIN symbols caller ON caller.id = e.caller_id
 JOIN symbols callee ON callee.id = e.callee_id
 JOIN targets t ON t.id = e.target_id
 WHERE callee.usr = :usr AND e.source = 'objdump'`,
+	},
+	{
+		Purpose: "What happened to one call: every pass's decision, plus whether the inlined body survived into the object. " +
+			"A row in inline_records with no matching inline_instances row means GCC inlined the callee and then folded the copy away.",
+		SQL: `SELECT r.pass, r.inlined, r.reason, r.file, r.line,
+       (SELECT COUNT(*) FROM inline_instances i
+         WHERE i.caller_id = r.caller_id AND i.callee_id = r.callee_id) AS surviving_bodies
+FROM inline_records r
+JOIN symbols caller ON caller.id = r.caller_id
+JOIN symbols callee ON callee.id = r.callee_id
+WHERE caller.usr = :caller_usr AND callee.usr = :callee_usr`,
+	},
+	{
+		Purpose: "Where a function's body was inlined to (the reverse question — useful for a symbol with no runtime callers)",
+		SQL: `SELECT caller.usr, caller.name, i.depth, i.file, i.line, i.object
+FROM inline_instances i
+JOIN symbols callee ON callee.id = i.callee_id
+JOIN symbols caller ON caller.id = i.caller_id
+WHERE callee.usr = :usr`,
 	},
 	{
 		Purpose: "Fetch source content for a location returned by any tool",

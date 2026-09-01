@@ -196,3 +196,53 @@ func findDeclarations(sps []dwarfingest.Subprogram) []dwarfingest.Subprogram {
 	}
 	return out
 }
+
+// TestReadInlineInstances: the fixture holds one surviving inlined body
+// per plane — use_dispatch folded into main by the IPA inliner, and
+// scale_by_two folded into scaled_compute by the early inliner, which is
+// the case no IPA dump can report.
+func TestReadInlineInstances(t *testing.T) {
+	for _, tc := range []struct {
+		object string
+		parts  []string
+		callee string
+		caller string
+		line   int
+	}{
+		{"app1 main.c.o", []string{"app1", "app1.p", "main.c.o"}, "use_dispatch", "main", 14},
+		{"shared_utils.c.o", []string{"lib", "libshared.a.p", "shared_utils.c.o"}, "scale_by_two", "scaled_compute", 27},
+	} {
+		t.Run(tc.object, func(t *testing.T) {
+			args := append([]string{repoRoot(t), "testdata", "fixture", "builddir"}, tc.parts...)
+			info, err := dwarfingest.Read(filepath.Join(args...))
+			if err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			var hit *dwarfingest.InlineInstance
+			for i, ii := range info.InlineInstances {
+				if ii.CalleeName == tc.callee {
+					hit = &info.InlineInstances[i]
+					break
+				}
+			}
+			if hit == nil {
+				t.Fatalf("no inline instance for %s; got %+v", tc.callee, info.InlineInstances)
+			}
+			if hit.CallerName != tc.caller {
+				t.Errorf("CallerName = %q, want %q", hit.CallerName, tc.caller)
+			}
+			if hit.Depth != 1 {
+				t.Errorf("Depth = %d, want 1", hit.Depth)
+			}
+			if hit.ParentCalleeName != "" {
+				t.Errorf("ParentCalleeName = %q, want empty at depth 1", hit.ParentCalleeName)
+			}
+			if hit.Line != tc.line {
+				t.Errorf("Line = %d, want %d", hit.Line, tc.line)
+			}
+			if !strings.HasSuffix(hit.File, ".c") {
+				t.Errorf("File = %q, want a .c path", hit.File)
+			}
+		})
+	}
+}

@@ -65,6 +65,11 @@ func Read(path string) (*Info, error) {
 			sp := parseSubprogram(e, curCUFiles, tc)
 			info.Subprograms = append(info.Subprograms, sp)
 
+		case dwarf.TagInlinedSubroutine:
+			if ii, ok := parseInlineInstance(e, curCUFiles, stack, dw); ok {
+				info.InlineInstances = append(info.InlineInstances, ii)
+			}
+
 		case dwarf.TagCallSite:
 			cs := parseCallSite(e, curCUFiles, curLR, stack, dw)
 			if cs.File != "" || cs.Line != 0 {
@@ -132,6 +137,14 @@ func newFrame(e *dwarf.Entry, dw *dwarf.Data) frame {
 		if n, ok := e.Val(dwarf.AttrName).(string); ok {
 			f.subprogramName = n
 		}
+		// A concrete out-of-line instance (emitted when a callee is both
+		// inlined somewhere and kept as a standalone body) carries no
+		// name of its own — only a pointer at the abstract instance.
+		if f.subprogramName == "" {
+			if off, ok := e.Val(dwarf.AttrAbstractOrigin).(dwarf.Offset); ok {
+				f.subprogramName = lookupName(dw, off)
+			}
+		}
 	case dwarf.TagInlinedSubroutine:
 		if off, ok := e.Val(dwarf.AttrAbstractOrigin).(dwarf.Offset); ok {
 			f.inlinedFromName = lookupName(dw, off)
@@ -173,6 +186,54 @@ func parseSubprogram(e *dwarf.Entry, files []*dwarf.LineFile, tc *typeCache) Sub
 	}
 	sp.Signature = buildSignature(tc, e)
 	return sp
+}
+
+// parseInlineInstance reads one DW_TAG_inlined_subroutine. The DIE says
+// only which body was copied in (DW_AT_abstract_origin) and where the
+// call was written (DW_AT_call_file/line/column); who it was copied
+// into comes from the frame stack, which is also where nesting depth
+// comes from. Returns false when the origin does not resolve to a name
+// — an unnamed inline event is not a fact worth storing.
+func parseInlineInstance(e *dwarf.Entry, files []*dwarf.LineFile, stack []frame, dw *dwarf.Data) (InlineInstance, bool) {
+	ii := InlineInstance{Depth: 1}
+	off, ok := e.Val(dwarf.AttrAbstractOrigin).(dwarf.Offset)
+	if !ok {
+		return InlineInstance{}, false
+	}
+	if ii.CalleeName = lookupName(dw, off); ii.CalleeName == "" {
+		return InlineInstance{}, false
+	}
+
+	if idx, ok := e.Val(dwarf.AttrCallFile).(int64); ok {
+		ii.File = fileFromIdx(files, int(idx))
+	}
+	if ln, ok := e.Val(dwarf.AttrCallLine).(int64); ok {
+		ii.Line = int(ln)
+	}
+	if col, ok := e.Val(dwarf.AttrCallColumn).(int64); ok {
+		ii.Column = int(col)
+	}
+
+	// Walk outward: every enclosing inlined_subroutine is one more level
+	// of nesting, and the first real subprogram is the physical frame.
+	for i := len(stack) - 1; i >= 0; i-- {
+		f := stack[i]
+		if f.tag == dwarf.TagInlinedSubroutine {
+			if ii.ParentCalleeName == "" {
+				ii.ParentCalleeName = f.inlinedFromName
+			}
+			ii.Depth++
+			continue
+		}
+		if f.tag == dwarf.TagSubprogram {
+			ii.CallerName = f.subprogramName
+			break
+		}
+	}
+	if ii.CallerName == "" {
+		return InlineInstance{}, false
+	}
+	return ii, true
 }
 
 // parseCallSite recovers the source location of a call. GCC 16 does NOT

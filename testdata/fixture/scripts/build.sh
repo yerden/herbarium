@@ -13,6 +13,7 @@ c_args=(
   -fdump-ipa-inline
   -fdump-ipa-devirt
   -fdump-ipa-icf
+  -fsave-optimization-record
   -fno-inline-functions-called-once
   -ffunction-sections
   -fdata-sections

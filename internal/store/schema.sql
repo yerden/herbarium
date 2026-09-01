@@ -142,6 +142,46 @@ CREATE TABLE inline_decisions (
   inlined   INTEGER             -- 0/1
 );
 
+-- Every inlining decision GCC logged, from -fsave-optimization-record.
+-- Wider than inline_decisions in two ways: it covers the early inliner
+-- (which folds always_inline and trivial callees before any IPA pass
+-- runs, leaving no trace in .cgraph or .inline), and it keeps the
+-- rejections with the compiler's own reason. A decision here is not a
+-- guarantee the code survived to the binary — a callee that folds to a
+-- constant afterwards leaves a row here and none in inline_instances.
+CREATE TABLE inline_records (
+  caller_id INTEGER REFERENCES symbols(id),
+  callee_id INTEGER REFERENCES symbols(id),
+  pass      TEXT NOT NULL,      -- 'einline' (pre-IPA) | 'inline' (IPA)
+  inlined   INTEGER NOT NULL,   -- 0/1
+  reason    TEXT,               -- GCC's explanation when inlined = 0
+  file      TEXT,
+  line      INTEGER,
+  column    INTEGER,
+  object    TEXT                -- .o the record came from, builddir-relative
+);
+CREATE INDEX idx_ir_caller ON inline_records(caller_id, inlined);
+CREATE INDEX idx_ir_callee ON inline_records(callee_id, inlined);
+
+-- Inlined bodies that survived into the object, from DWARF's
+-- DW_TAG_inlined_subroutine. Outcome rather than decision: this is what
+-- the shipped code actually contains, whichever pass put it there, but a
+-- callee whose code folded away entirely leaves no DIE and so no row.
+-- depth 1 is inlined straight into caller_id; deeper rows name the
+-- inlined body they landed inside in parent_callee_id.
+CREATE TABLE inline_instances (
+  callee_id        INTEGER REFERENCES symbols(id),
+  caller_id        INTEGER REFERENCES symbols(id),
+  parent_callee_id INTEGER REFERENCES symbols(id),  -- NULL at depth 1
+  depth            INTEGER NOT NULL,
+  file             TEXT,
+  line             INTEGER,
+  column           INTEGER,
+  object           TEXT
+);
+CREATE INDEX idx_ii_caller ON inline_instances(caller_id);
+CREATE INDEX idx_ii_callee ON inline_instances(callee_id);
+
 -- Identical-code folding groups from GCC's -fdump-ipa-icf. IPA-ICF only:
 -- linker-level ICF (gold/lld --icf=all) is a different pass and is not
 -- tracked. One row per non-singular class per TU; a group's winner is
