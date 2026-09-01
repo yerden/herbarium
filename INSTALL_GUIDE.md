@@ -164,7 +164,7 @@ stderr, so stdio needs no extra flags.
 of `verify_source` and `list_source_drift`, which compare the on-disk checkout
 against the packed blobs. Everything else answers from the `.hbr` alone, which
 means the artifact is portable: copy it to another machine, drop
-`--project-root`, and the other 25 tools work unchanged.
+`--project-root`, and the other 26 tools work unchanged.
 
 ### HTTP transport
 
