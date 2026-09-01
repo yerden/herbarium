@@ -141,16 +141,16 @@ func TestE2EFixtureContract(t *testing.T) {
 
 	// --- Inline decision confirms it explicitly ---
 	{
-		var resp herbmcp.DescribeInlineDecisionsResponse
-		call(t, client, ctx, "describe_inline_decisions", map[string]any{"caller_usr": mainUSR}, &resp)
+		var resp herbmcp.DescribeInliningResponse
+		call(t, client, ctx, "describe_inlining", map[string]any{"caller_usr": mainUSR}, &resp)
 		var sawInlined bool
-		for _, d := range resp.Decisions {
+		for _, d := range resp.CgraphEdges {
 			if d.Callee.Name == "use_dispatch" && d.Inlined {
 				sawInlined = true
 			}
 		}
 		if !sawInlined {
-			t.Errorf("no inlined decision for use_dispatch under main: %+v", resp.Decisions)
+			t.Errorf("no inlined decision for use_dispatch under main: %+v", resp.CgraphEdges)
 		}
 		// The same call was weighed twice: the early inliner declined it
 		// (with a reason), then the IPA inliner took it.
@@ -178,13 +178,31 @@ func TestE2EFixtureContract(t *testing.T) {
 		}
 	}
 
+	// --- One call, one verdict: the tool that spares an agent the
+	//     three-plane reconciliation above ---
+	{
+		var resp herbmcp.ExplainCallResponse
+		call(t, client, ctx, "explain_call", map[string]any{
+			"caller_usr": mainUSR,
+			"callee_usr": useDispatchUSR,
+			"target":     "app1",
+		}, &resp)
+		if resp.Verdict != herbmcp.VerdictInlinedAndPresent {
+			t.Errorf("explain_call(main -> use_dispatch) = %q, want %q (%+v)",
+				resp.Verdict, herbmcp.VerdictInlinedAndPresent, resp.PerObject)
+		}
+		if resp.Evidence.LinkedEdge {
+			t.Error("objdump still sees a call to use_dispatch in app1; it was inlined away")
+		}
+	}
+
 	// --- The early inliner's fold, which no IPA dump can report ---
 	{
 		usr := symbolUSR(t, client, "scale_by_two")
-		var resp herbmcp.ListInlineSitesResponse
-		call(t, client, ctx, "list_inline_sites", map[string]any{"callee_usr": usr}, &resp)
+		var resp herbmcp.ListInlineInstancesResponse
+		call(t, client, ctx, "list_inline_instances", map[string]any{"callee_usr": usr}, &resp)
 		if len(resp.Instances) != 1 || resp.Instances[0].Caller.Name != "scaled_compute" {
-			t.Fatalf("list_inline_sites(scale_by_two) = %+v, want one fold into scaled_compute", resp.Instances)
+			t.Fatalf("list_inline_instances(scale_by_two) = %+v, want one fold into scaled_compute", resp.Instances)
 		}
 		var sawEarly bool
 		for _, r := range resp.Records {
@@ -196,10 +214,10 @@ func TestE2EFixtureContract(t *testing.T) {
 			t.Errorf("no einline success for scale_by_two: %+v", resp.Records)
 		}
 		// It never reaches the IPA inliner, so the .cgraph plane is silent.
-		var dresp herbmcp.DescribeInlineDecisionsResponse
-		call(t, client, ctx, "describe_inline_decisions",
+		var dresp herbmcp.DescribeInliningResponse
+		call(t, client, ctx, "describe_inlining",
 			map[string]any{"caller_usr": symbolUSR(t, client, "scaled_compute")}, &dresp)
-		for _, d := range dresp.Decisions {
+		for _, d := range dresp.CgraphEdges {
 			if d.Callee.Name == "scale_by_two" && d.Inlined {
 				t.Error("scale_by_two shows up as an IPA inline decision; the early inliner had already folded it")
 			}

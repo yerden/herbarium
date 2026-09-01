@@ -11,7 +11,7 @@ Every fact in the index traces back to something the compiler or linker already 
 Two subcommands, each with a narrow contract:
 
 - `herbarium collect --builddir DIR --project-root DIR --out FILE` — reads the builddir and writes a `.hbr`. Runs `nm` and `objdump` against the finished binaries; that's the extent of subprocess use.
-- `herbarium serve --hbr FILE [--project-root DIR]` — opens an `.hbr` read-only and exposes 28 MCP tools. Zero external subprocess deps at serve time. Stdio by default; `--transport http` switches to streamable HTTP.
+- `herbarium serve --hbr FILE [--project-root DIR]` — opens an `.hbr` read-only and exposes 29 MCP tools. Zero external subprocess deps at serve time. Stdio by default; `--transport http` switches to streamable HTTP.
 
 The `.hbr` file is the whole artifact: schema, facts, and compressed source blobs of every file the build touched. Portable across machines.
 
@@ -70,7 +70,7 @@ herbarium serve --hbr project.hbr --project-root .
 
 ## MCP tools
 
-The 28 tools are grouped by concern. Every location-returning tool wraps its position in a uniform `{path, line, column, blob_hash, snippet, absolute_path}` shape.
+The 29 tools are grouped by concern. Every location-returning tool wraps its position in a uniform `{path, line, column, blob_hash, snippet, absolute_path}` shape.
 
 **Escape hatches** — `describe_schema`, `sql_query`.
 
@@ -82,7 +82,7 @@ The 28 tools are grouped by concern. Every location-returning tool wraps its pos
 
 **Call graph, source view** — `list_callers`, `list_callees`, `list_call_paths`.
 
-**Call graph, runtime view** — `list_linked_callers`, `list_linked_callees`, `describe_inline_decisions` (three planes: every pass's decisions from the optimization record, the inlined bodies DWARF says survived, and the older `.cgraph` per-edge tag), `list_inline_sites` (where a function's body ended up).
+**Call graph, runtime view** — `list_linked_callers`, `list_linked_callees`, `describe_inlining` (three planes: every pass's decisions from the optimization record, the inlined bodies DWARF says survived, and the older `.cgraph` per-edge tag as a cross-check), `list_inline_instances` (where a function's body ended up), `explain_call` (one verdict for one call — `inlined_and_present`, `inlined_then_folded`, `declined` with GCC's reason, or `no_decision_logged` — plus the evidence behind it).
 
 **Indirect calls** — `list_indirect_call_sites`, `list_address_taken_functions`, `resolve_indirect_call`, `list_devirt_hints`.
 
@@ -122,7 +122,7 @@ internal/
   linkplane/            nm + objdump + map file parsers
   usr/                  USR synthesis
   ingest/               pipeline orchestrator
-  mcp/                  MCP server + 28 tools
+  mcp/                  MCP server + 29 tools
 testdata/
   fixture/              minimal Meson project the tests build against
   samples/gcc-16/       pinned parser fixtures

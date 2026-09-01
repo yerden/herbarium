@@ -14,7 +14,8 @@
 //   symbol_tools.go            find_symbol, describe_symbol
 //   callgraph_source_tools.go  list_callers, list_callees, list_call_paths
 //   callgraph_runtime_tools.go list_linked_callers, list_linked_callees,
-//                              describe_inline_decisions, list_inline_sites
+//                              describe_inlining, list_inline_instances,
+//                              explain_call
 //   indirect_tools.go          list_indirect_call_sites,
 //                              list_address_taken_functions,
 //                              resolve_indirect_call, list_devirt_hints

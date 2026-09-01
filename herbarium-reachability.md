@@ -67,14 +67,17 @@ is invisible to both cgraph and objdump edge lists, and often absent from
 A missing `link_resolutions` row can mean the symbol was inlined at every
 call site or that it was truly stripped. To disambiguate:
 
-- `herbarium_list_inline_sites` — if it returns instances, the symbol's
+- `herbarium_list_inline_instances` — if it returns instances, the symbol's
   body is physically present inside its callers: inlined away, not
   stripped. This is the direct answer and it covers folds the IPA dumps
   never saw (`always_inline`, trivial static callees).
-- `herbarium_describe_inline_decisions` — the `records` list gives each
-  pass's verdict, with GCC's own reason for the calls it declined. Note
-  that `decisions` (the older `.cgraph` plane) is IPA-stage only, so
-  `inlined=0` there does not mean the call survived.
+- `herbarium_explain_call` — for one caller/callee pair this returns a
+  single verdict: `inlined_and_present`, `inlined_then_folded`,
+  `declined` (with GCC's reason), or `no_decision_logged`. Prefer it over
+  reading the planes yourself.
+- `herbarium_describe_inlining` — the survey form, for every call in one
+  function. `records` gives each pass's verdict; `cgraph_edges` is
+  IPA-stage only, so `inlined=0` there does not mean the call survived.
 - Cross-check by comparing `herbarium_list_callers` (cgraph, pre-inlining)
   with `herbarium_list_linked_callers` (objdump, post-inlining). Callers
   present in the first but absent from the second are the inlined sites.

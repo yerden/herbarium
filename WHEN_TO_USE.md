@@ -49,7 +49,7 @@ Grep finds the address-take but not the resolution set.
 - "Did GCC specialize / clone this function (e.g. `foo.constprop.0`)?"
 - "Any devirtualization hints here?"
 
-Tools: `describe_inline_decisions`, `list_inline_sites`, `list_devirt_hints`.
+Tools: `explain_call` (start here for one specific call), `describe_inlining`, `list_inline_instances`, `list_devirt_hints`.
 
 These facts exist only in the compiler's own records — its optimization record, its IPA dumps, and DWARF. There is nothing in source to grep for.
 

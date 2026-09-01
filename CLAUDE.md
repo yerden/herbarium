@@ -7,7 +7,7 @@ Working notes for Claude when editing this repo. Read `herbarium-plan.md` first 
 `herbarium` ingests an already-built Meson C project into a single SQLite artifact (`.hbr`) and serves it over MCP for AI agents. Every fact in the index traces back to a compiler dump (GCC's `-fcallgraph-info`, `-fdump-ipa-*`), DWARF, or a binutils inspector (`nm`, `objdump`) — never to a re-parser. Two subcommands:
 
 - `herbarium collect` — reads a builddir + project-root, writes an `.hbr`.
-- `herbarium serve` — opens an `.hbr` read-only, exposes 28 MCP tools over stdio or streamable HTTP.
+- `herbarium serve` — opens an `.hbr` read-only, exposes 29 MCP tools over stdio or streamable HTTP.
 
 ## Non-negotiables (from `herbarium-plan.md § Design principles`)
 
@@ -33,7 +33,7 @@ internal/
   linkplane/            nm + objdump + map file parsers; runTool wraps exec
   usr/                  USR synthesis per herbarium-plan.md appendix
   ingest/               pipeline orchestrator: Compiler, DWARF, Targets, Link, Sources
-  mcp/                  MCP server + 28 tools; tests build fixture .hbr in-process
+  mcp/                  MCP server + 29 tools; tests build fixture .hbr in-process
 testdata/
   fixture/              minimal Meson project the tests build against
   samples/gcc-16/       pinned parser fixtures (dump files, map files, .ninja_deps)
@@ -59,7 +59,7 @@ Phase 7 (incremental re-ingest) is **deferred by user decision** — every colle
 
 ## MCP tools (Phase 6, landed)
 
-28 tools grouped by file under `internal/mcp/`. Every location-returning tool wraps its position in a uniform `Location{path, line?, column?, blob_hash, snippet?, absolute_path?}` shape (see `location.go`). Response payloads land as both `text` (JSON pretty-printed) and `StructuredContent` on the `CallToolResult` — an agent can consume either. Tool descriptions are the user-facing contract; edit them if behavior changes.
+29 tools grouped by file under `internal/mcp/`. Every location-returning tool wraps its position in a uniform `Location{path, line?, column?, blob_hash, snippet?, absolute_path?}` shape (see `location.go`). Response payloads land as both `text` (JSON pretty-printed) and `StructuredContent` on the `CallToolResult` — an agent can consume either. Tool descriptions are the user-facing contract; edit them if behavior changes.
 
 Groups:
 
@@ -68,7 +68,7 @@ Groups:
 - **Targets:** `list_targets`, `describe_target`.
 - **Symbols:** `find_symbol` (FTS5 with prefix tokens), `describe_symbol` (multi-def + linkage_names + reachability + link_resolutions).
 - **Call graph, source view:** `list_callers`, `list_callees`, `list_call_paths` (in-memory DFS, cycle-in-path guard, max_depth cap).
-- **Call graph, runtime view:** `list_linked_callers`, `list_linked_callees`, `describe_inline_decisions`, `list_inline_sites`.
+- **Call graph, runtime view:** `list_linked_callers`, `list_linked_callees`, `describe_inlining` (three planes: `records`, `instances`, `cgraph_edges`), `list_inline_instances`, `explain_call` (one verdict for one call, with its evidence).
 - **Indirect:** `list_indirect_call_sites`, `list_address_taken_functions`, `resolve_indirect_call`, `list_devirt_hints`.
 - **Linkage + reachability:** `describe_link_resolution`, `list_weak_symbols`, `list_undefined_symbols`, `list_icf_groups`, `list_unreachable_symbols`, `list_entry_points`.
 
@@ -104,7 +104,7 @@ Build the fixture via `bash testdata/fixture/scripts/build.sh` — this pins the
 ## Testing
 
 - `go test ./...` covers everything. The MCP tests build a fresh `.hbr` in-process via `collectForTest` in `internal/mcp/collect_helper_test.go` — no test needs `go run ./cmd/herbarium`.
-- `TestE2EFixtureContract` in `internal/mcp/e2e_test.go` walks 15 tools and asserts the fixture's full contract; a regression in either ingest or MCP surface trips it.
+- `TestE2EFixtureContract` in `internal/mcp/e2e_test.go` walks 16 tools and asserts the fixture's full contract; a regression in either ingest or MCP surface trips it.
 - Parser tests use pinned samples under `testdata/samples/gcc-16/`. The opt-record samples there are gzipped JSON copied straight out of a fresh fixture builddir (`lib/shared_utils.c.c.opt-record.json.gz`, `app1/main.c.c.opt-record.json.gz`); refresh them the same way if GCC changes the record shape. If the pinned GCC version changes, update `store.SchemaVersion` only if the on-disk schema also changes — sample-format drift alone doesn't warrant a bump.
 - `linkplane/exec_test.go` covers the subprocess-error wrapping contract (nm/objdump errors must surface stderr, not just an exit code).
 

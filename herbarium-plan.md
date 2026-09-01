@@ -415,11 +415,14 @@ When `herbarium serve` is launched with `--project-root <path>`, responses addit
 **`list_linked_callees(caller_usr, target)`** — outgoing calls per `objdump`.
 *Benefit:* symmetric ground truth.
 
-**`describe_inline_decisions(caller_usr)`** — what happened to this function's calls, across all three inlining planes: `records` (every pass's decision, rejections and reasons included, from the optimization record), `instances` (the inlined bodies DWARF says survived into the object), `decisions` (the older `.cgraph` per-edge tag, IPA-stage only).
+**`describe_inlining(caller_usr)`** — what happened to this function's calls, across all three inlining planes: `records` (every pass's decision, rejections and reasons included, from the optimization record), `instances` (the inlined bodies DWARF says survived into the object), `cgraph_edges` (the older `.cgraph` per-edge tag, IPA-stage only, kept as a cross-check rather than an answer).
 *Benefit:* reconciles the two callgraph views so the agent knows whether a source-level edge exists in the binary — and, when the planes disagree, says which stage lost it.
 
-**`list_inline_sites(callee_usr)`** — the reverse: everywhere this function's body was inlined into another.
+**`list_inline_instances(callee_usr)`** — the reverse: everywhere this function's body was inlined into another.
 *Benefit:* answers "where did this helper go?" for a symbol with no runtime callers. A function with instances but no linked callers was inlined everywhere, not dead.
+
+**`explain_call(caller_usr, callee_usr, target?)`** — one verdict for one call, plus the evidence: `inlined_and_present`, `inlined_then_folded`, `declined` (with GCC's own reason), `no_decision_logged`, or `mixed` when a USR's TUs decided differently.
+*Benefit:* the three planes are the right shape for storage and the wrong shape for a consumer — an agent asking about a single call should not have to know GCC's pass pipeline to route its own question. Verdicts are per-object, joined on the `.o`, so "inlined then folded" is never confused with "the body landed in another TU".
 
 ### Indirect calls and function-pointer dispatch
 
@@ -557,7 +560,7 @@ Skipped by user decision after Phase 6. `herbarium collect` always writes a fres
   - A GCC clone (`use_dispatch.constprop.0`) recorded in `symbols.linkage_names`.
   - An early-inlined helper (`scale_by_two`, `always_inline`, folded into `scaled_compute` in `lib/shared_utils.c`) — the pre-IPA fold that appears in `inline_records`/`inline_instances` and in neither `inline_decisions` nor any `-fdump-ipa-*` dump.
 - Golden-file tests for each ingest module land in the module's own `_test.go` under `internal/gccdump/`, `internal/dwarfingest/`, `internal/linkplane/`, and `internal/ninjadeps/`. Sample dumps live under `testdata/samples/gcc-<version>/`.
-- End-to-end coverage: `TestE2EFixtureContract` in `internal/mcp/e2e_test.go` boots an in-process MCP client against a freshly-collected `.hbr` and walks 15 tools, asserting the fixture's full contract (multi-def hook, clone linkage names, source-vs-runtime call graph asymmetry from inlining, all three inlining planes including the early-inline fold, dead-strip + inline reachability=0, undefined externals, per-target link resolution).
+- End-to-end coverage: `TestE2EFixtureContract` in `internal/mcp/e2e_test.go` boots an in-process MCP client against a freshly-collected `.hbr` and walks 16 tools, asserting the fixture's full contract (multi-def hook, clone linkage names, source-vs-runtime call graph asymmetry from inlining, all three inlining planes including the early-inline fold, dead-strip + inline reachability=0, undefined externals, per-target link resolution).
 
 **Total estimated effort:** ~3.5 weeks of focused work.
 
@@ -694,7 +697,7 @@ GCC's IPA passes may emit specialized variants of a source function: `<name>.con
 
 **Consequences:**
 - `list_callers` and `list_linked_callers` for a source function return the union across all clones; the response tags each edge with the linkage name of the clone that actually made the call so an agent can distinguish specialized from unspecialized dispatch when it matters.
-- `describe_inline_decisions` reports per-clone decisions under the parent USR.
+- `describe_inlining` reports per-clone decisions under the parent USR.
 - `link_resolutions` rows key on linkage name (not USR), because two clones of the same source function can resolve to different objects.
 
 ### Explicitly out of scope for USRs
