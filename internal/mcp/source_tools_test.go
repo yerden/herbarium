@@ -555,9 +555,10 @@ func startClientWithRoot(t *testing.T, hbrPath, projectRoot string) *mcpclient.C
 }
 
 // TestSearchSourceLiteral: literal-substring search returns matches with
-// path/line/column/blob_hash/match_text populated. Fixture has 'add_ints'
-// in exactly four places (2 files under lib/, plus a header) — that count
-// is the schema-level assertion.
+// path/line/column/snippet populated. Fixture has 'add_ints' in exactly
+// four places (2 files under lib/, plus a header) — that count is the
+// schema-level assertion. blob_hash lives once per file in Files, and
+// match_text is omitted because on a literal search it is the pattern.
 func TestSearchSourceLiteral(t *testing.T) {
 	client := startClient(t, fixtureHBR(t))
 	req := mcp.CallToolRequest{}
@@ -574,25 +575,52 @@ func TestSearchSourceLiteral(t *testing.T) {
 	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if payload.Total != 4 {
-		t.Errorf("Total = %d, want 4 (dispatch_impls.c, shared_utils.c ×2, shared_utils.h)", payload.Total)
+	if payload.Summary.Total != 4 || payload.Summary.Returned != 4 {
+		t.Errorf("summary = %d/%d returned/total, want 4/4 (dispatch_impls.c, shared_utils.c ×2, shared_utils.h)",
+			payload.Summary.Returned, payload.Summary.Total)
 	}
 	if payload.Truncated {
 		t.Error("Truncated=true on a 4-match query with default limit")
+	}
+	if payload.Summary.FilesWithMatches != 3 {
+		t.Errorf("FilesWithMatches = %d, want 3", payload.Summary.FilesWithMatches)
+	}
+	// shared_utils.c holds two of the four, so the per-file counts must
+	// distinguish it from the single-hit files.
+	if got := payload.Summary.MatchesByFile["lib/shared_utils.c"]; got != 2 {
+		t.Errorf("MatchesByFile[lib/shared_utils.c] = %d, want 2", got)
+	}
+	// All four live under lib/ (the header included), so the directory
+	// rollup groups what the per-file map splits.
+	if got := payload.Summary.MatchesByDirectory["lib"]; got != 4 {
+		t.Errorf("MatchesByDirectory[lib] = %d, want 4", got)
 	}
 	for _, m := range payload.Matches {
 		if m.Location.Path == "" || m.Location.Line == 0 || m.Location.Column == 0 {
 			t.Errorf("incomplete location: %+v", m.Location)
 		}
-		if m.Location.BlobHash == "" {
-			t.Errorf("%s:%d: BlobHash empty", m.Location.Path, m.Location.Line)
+		if m.Location.BlobHash != "" {
+			t.Errorf("%s:%d: BlobHash set per match; it belongs in Files", m.Location.Path, m.Location.Line)
 		}
-		if m.MatchText != "add_ints" {
-			t.Errorf("%s:%d: MatchText = %q, want add_ints", m.Location.Path, m.Location.Line, m.MatchText)
+		if m.MatchText != "" {
+			t.Errorf("%s:%d: MatchText = %q on a literal search, want empty", m.Location.Path, m.Location.Line, m.MatchText)
 		}
 		if m.Location.Snippet == nil || m.Location.Snippet.Text == "" {
 			t.Errorf("%s:%d: snippet empty", m.Location.Path, m.Location.Line)
 		}
+	}
+	if len(payload.Files) != 3 {
+		t.Fatalf("Files = %+v, want 3 entries", payload.Files)
+	}
+	var byFile int
+	for _, f := range payload.Files {
+		if f.BlobHash == "" {
+			t.Errorf("%s: Files entry missing BlobHash", f.Path)
+		}
+		byFile += f.Matches
+	}
+	if byFile != payload.Summary.Total {
+		t.Errorf("Files match counts sum to %d, want %d", byFile, payload.Summary.Total)
 	}
 }
 
@@ -655,8 +683,8 @@ func TestSearchSourceRegex(t *testing.T) {
 	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if payload.Total != 2 {
-		t.Errorf("Total = %d, want 2 (app1/main.c + app2/main.c)", payload.Total)
+	if payload.Summary.Total != 2 {
+		t.Errorf("Summary.Total = %d, want 2 (app1/main.c + app2/main.c)", payload.Summary.Total)
 	}
 	if !payload.IsRegex {
 		t.Error("IsRegex flag not set in response")
@@ -664,6 +692,11 @@ func TestSearchSourceRegex(t *testing.T) {
 	for _, m := range payload.Matches {
 		if !strings.HasSuffix(m.Location.Path, "main.c") {
 			t.Errorf("unexpected path %q", m.Location.Path)
+		}
+		// A regex match keeps match_text: it is the one thing the caller
+		// cannot reconstruct from the pattern.
+		if m.MatchText == "" {
+			t.Errorf("%s:%d: MatchText empty on a regex search", m.Location.Path, m.Location.Line)
 		}
 	}
 
@@ -705,7 +738,7 @@ func TestSearchSourceFilters(t *testing.T) {
 	if err := json.Unmarshal([]byte(textOf(t, res)), &kindPayload); err != nil {
 		t.Fatalf("kind unmarshal: %v", err)
 	}
-	if kindPayload.Total == 0 {
+	if kindPayload.Summary.Total == 0 {
 		t.Error("kind=header: no matches for 'struct ops'")
 	}
 	for _, m := range kindPayload.Matches {
@@ -731,7 +764,7 @@ func TestSearchSourceFilters(t *testing.T) {
 	if err := json.Unmarshal([]byte(textOf(t, res)), &targetPayload); err != nil {
 		t.Fatalf("target unmarshal: %v", err)
 	}
-	if targetPayload.Total == 0 {
+	if targetPayload.Summary.Total == 0 {
 		t.Error("target=app1: no matches for 'app1:'")
 	}
 	for _, m := range targetPayload.Matches {
@@ -741,8 +774,10 @@ func TestSearchSourceFilters(t *testing.T) {
 	}
 }
 
-// TestSearchSourceLimit: with limit=1 on a many-match pattern, exactly one
-// match returns and Truncated is set.
+// TestSearchSourceLimit: limit caps the returned rows, not the scan. With
+// limit=1 on a many-match pattern exactly one match comes back, but the
+// summary still reports how many there really are and where — which is
+// what lets an agent narrow instead of re-querying with a bigger limit.
 func TestSearchSourceLimit(t *testing.T) {
 	client := startClient(t, fixtureHBR(t))
 	req := mcp.CallToolRequest{}
@@ -762,11 +797,24 @@ func TestSearchSourceLimit(t *testing.T) {
 	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if payload.Total != 1 {
-		t.Errorf("Total = %d, want 1 under limit=1", payload.Total)
+	if len(payload.Matches) != 1 || payload.Summary.Returned != 1 {
+		t.Errorf("returned %d matches (Summary.Returned=%d), want 1 under limit=1",
+			len(payload.Matches), payload.Summary.Returned)
 	}
 	if !payload.Truncated {
 		t.Error("Truncated=false, want true under limit=1")
+	}
+	// The fixture has an #include in every .c and in the headers, so the
+	// true count is well above the one row returned.
+	if payload.Summary.Total <= 1 {
+		t.Errorf("Summary.Total = %d, want the full count despite limit=1", payload.Summary.Total)
+	}
+	if payload.Summary.FilesWithMatches <= 1 {
+		t.Errorf("FilesWithMatches = %d, want every including file counted", payload.Summary.FilesWithMatches)
+	}
+	if len(payload.Files) != payload.Summary.FilesWithMatches {
+		t.Errorf("Files has %d entries but FilesWithMatches = %d",
+			len(payload.Files), payload.Summary.FilesWithMatches)
 	}
 }
 
@@ -792,7 +840,7 @@ func TestSearchSourceContext(t *testing.T) {
 	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if payload.Total == 0 {
+	if payload.Summary.Total == 0 {
 		t.Fatal("no matches for icf_add_one in lib/icf_pair.c")
 	}
 	// The definition at line 8 has plenty of surrounding lines, so
@@ -826,8 +874,11 @@ func TestSearchSourceNoMatch(t *testing.T) {
 	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if payload.Total != 0 {
-		t.Errorf("Total = %d, want 0", payload.Total)
+	if payload.Summary.Total != 0 {
+		t.Errorf("Summary.Total = %d, want 0", payload.Summary.Total)
+	}
+	if payload.Files != nil {
+		t.Errorf("Files = %+v, want none", payload.Files)
 	}
 	if payload.FilesScanned == 0 {
 		t.Error("FilesScanned = 0, expected non-zero (fixture has files)")
@@ -869,8 +920,8 @@ func TestSearchSourceIncludeExternal(t *testing.T) {
 	if err := json.Unmarshal([]byte(textOf(t, res)), &def); err != nil {
 		t.Fatalf("default unmarshal: %v", err)
 	}
-	if def.Total != 0 {
-		t.Errorf("default search matched external content (%d hits); expected 0 without include_external", def.Total)
+	if def.Summary.Total != 0 {
+		t.Errorf("default search matched external content (%d hits); expected 0 without include_external", def.Summary.Total)
 	}
 
 	req.Params.Arguments = map[string]any{
@@ -889,7 +940,7 @@ func TestSearchSourceIncludeExternal(t *testing.T) {
 	if err := json.Unmarshal([]byte(textOf(t, res)), &ext); err != nil {
 		t.Fatalf("with-ext unmarshal: %v", err)
 	}
-	if ext.Total == 0 {
+	if ext.Summary.Total == 0 {
 		t.Error("include_external=true matched 0 for FILE in /usr/include/; expected >0")
 	}
 }

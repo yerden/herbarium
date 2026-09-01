@@ -95,8 +95,14 @@ func (s *Server) registerSourceTools() {
 				"invocations, call-shape patterns like 'pthread_mutex_lock('. "+
 				"Filters match list_source_files (target, path_prefix, kind, "+
 				"include_external). Multiple matches on one line surface as separate "+
-				"entries, each with its column. Bounded by 'limit' (default 200, max "+
-				"2000); optional 'context' lines around each hit (default 0, max 20).",
+				"entries, each with its column. "+
+				"Answers summary-first: 'summary' counts every match found and where "+
+				"they cluster (by file, by directory) even when the row array is "+
+				"capped, so read it before 'matches'. Only 'matches' is bounded by "+
+				"'limit' (default 200, max 2000) — when truncated, narrow with "+
+				"path_prefix rather than raising limit. Per-file constants "+
+				"(blob_hash, absolute_path) live once each in 'files', not on every "+
+				"match. Optional 'context' lines around each hit (default 0, max 20).",
 		),
 		mcp.WithString("pattern", mcp.Required(),
 			mcp.Description("Substring to find (byte-literal). If regex=true, an RE2 pattern instead — RE2 has no catastrophic backtrack so agents can trust it.")),
@@ -545,23 +551,73 @@ const (
 	searchSourceDefaultLimit = 200
 	searchSourceMaxLimit     = 2000
 	searchSourceMaxContext   = 20
+	// searchSourceScanLimit bounds how many matches are *counted* after
+	// the returned array is full. Same split as explain_call's
+	// verdictScanLimit: the answer an agent acts on (here, how big the
+	// result set really is) must not be computed from a truncated scan,
+	// but neither should limit=1 decompress every blob in the project
+	// without bound.
+	searchSourceScanLimit = 100000
+	// searchSourceMaxByFile caps the per-file and per-directory count
+	// maps. files_with_matches still reports the true number, so a search
+	// spread across more files than this says so rather than lying.
+	searchSourceMaxByFile = 200
 )
 
-// SearchMatch is one hit in search_source. MatchText is the exact bytes
-// that matched (useful for regex captures — agents can see what fired).
+// SearchMatch is one hit in search_source. The Location deliberately
+// carries no blob_hash or absolute_path: both are per-file constants and
+// would otherwise be repeated on every row (a 64-char hash on each of a
+// few hundred matches is tens of KB to convey a handful of values). They
+// live once per file in SearchSourceResponse.Files instead, and nothing
+// an agent does next needs them inline — read_source keys on path.
 type SearchMatch struct {
-	Location  Location `json:"location"`
-	MatchText string   `json:"match_text,omitempty"`
+	Location Location `json:"location"`
+	// MatchText is set only for regex searches, where it shows which
+	// bytes actually fired. On a literal search it is the pattern itself,
+	// so echoing it per row is pure payload.
+	MatchText string `json:"match_text,omitempty"`
+}
+
+// SearchFile is one file that had at least one match, carrying the
+// per-file constants lifted out of the match rows.
+type SearchFile struct {
+	Path         string `json:"path"`
+	BlobHash     string `json:"blob_hash,omitempty"`
+	AbsolutePath string `json:"absolute_path,omitempty"`
+	Matches      int    `json:"matches"`
+}
+
+// SearchSummary counts the whole scan, so it stays true when Matches is
+// capped. It is what answers "how big is this really, and where is it
+// concentrated" without an agent having to raise limit and post-process
+// the rows.
+type SearchSummary struct {
+	Total            int `json:"total"`
+	Returned         int `json:"returned"`
+	FilesWithMatches int `json:"files_with_matches"`
+	// MatchesByFile / MatchesByDirectory are capped at
+	// searchSourceMaxByFile entries, highest count first.
+	MatchesByFile      map[string]int `json:"matches_by_file,omitempty"`
+	MatchesByDirectory map[string]int `json:"matches_by_directory,omitempty"`
 }
 
 // SearchSourceResponse is what search_source returns.
 type SearchSourceResponse struct {
-	Pattern      string        `json:"pattern"`
-	IsRegex      bool          `json:"regex,omitempty"`
-	Matches      []SearchMatch `json:"matches"`
-	Total        int           `json:"total"`
-	Truncated    bool          `json:"truncated"`
-	FilesScanned int           `json:"files_scanned"`
+	Pattern string `json:"pattern"`
+	IsRegex bool   `json:"regex,omitempty"`
+	// Summary counts every match found, not just the returned ones. Read
+	// it first.
+	Summary SearchSummary `json:"summary"`
+	Files   []SearchFile  `json:"files"`
+	Matches []SearchMatch `json:"matches"`
+	// Truncated is true when Matches hit the row cap. Summary still holds
+	// the real totals; narrow with path_prefix rather than raising limit.
+	Truncated bool `json:"truncated"`
+	// ScanTruncated is true only in the pathological case where the scan
+	// itself stopped at searchSourceScanLimit, so Summary undercounts.
+	ScanTruncated bool `json:"scan_truncated,omitempty"`
+	// FilesScanned is every file the filters admitted, matched or not.
+	FilesScanned int `json:"files_scanned"`
 }
 
 func (s *Server) handleSearchSource(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -615,9 +671,12 @@ func (s *Server) handleSearchSource(_ context.Context, req mcp.CallToolRequest) 
 		tables = append(tables, src{"external_sources", "abs_path", false})
 	}
 
-	full := false
+	byFile := map[string]int{}
+	byDir := map[string]int{}
+	var fileOrder []string
+	scanFull := false
 	for _, t := range tables {
-		if full {
+		if scanFull {
 			break
 		}
 		q := fmt.Sprintf(`SELECT %s, blob_hash FROM %s ORDER BY %s`, t.keyCol, t.table, t.keyCol)
@@ -647,8 +706,22 @@ func (s *Server) handleSearchSource(_ context.Context, req mcp.CallToolRequest) 
 				continue
 			}
 			resp.FilesScanned++
-			if s.searchInBlob(&resp, path, hash, content, patternBytes, re, ctxLines, limit) {
-				full = true
+			n, hitScanCap := s.searchInBlob(&resp, path, content, patternBytes, re, ctxLines, limit)
+			if n > 0 {
+				if byFile[path] == 0 {
+					fileOrder = append(fileOrder, path)
+					resp.Files = append(resp.Files, SearchFile{
+						Path:         path,
+						BlobHash:     hash,
+						AbsolutePath: s.absolutePathFor(path),
+					})
+				}
+				byFile[path] += n
+				byDir[searchDirOf(path)] += n
+				resp.Summary.Total += n
+			}
+			if hitScanCap {
+				scanFull = true
 				break
 			}
 		}
@@ -658,26 +731,77 @@ func (s *Server) handleSearchSource(_ context.Context, req mcp.CallToolRequest) 
 		}
 		rows.Close()
 	}
-	resp.Total = len(resp.Matches)
-	resp.Truncated = full
+	for i := range resp.Files {
+		resp.Files[i].Matches = byFile[resp.Files[i].Path]
+	}
+	resp.Summary.Returned = len(resp.Matches)
+	resp.Summary.FilesWithMatches = len(fileOrder)
+	resp.Summary.MatchesByFile = topCounts(byFile, searchSourceMaxByFile)
+	resp.Summary.MatchesByDirectory = topCounts(byDir, searchSourceMaxByFile)
+	resp.Truncated = resp.Summary.Returned < resp.Summary.Total
+	resp.ScanTruncated = scanFull
 	return jsonResult(resp)
 }
 
-// searchInBlob scans one file's content and appends matches to resp
-// until limit is reached. Returns true when limit is hit so the caller
-// stops iterating files.
-func (s *Server) searchInBlob(resp *SearchSourceResponse, path, hash string, content, pattern []byte, re *regexp.Regexp, ctxLines, limit int) bool {
+// searchDirOf is the directory key for matches_by_directory. Files at the
+// root get "." so the map never carries an empty key.
+func searchDirOf(path string) string {
+	if i := strings.LastIndex(path, "/"); i > 0 {
+		return path[:i]
+	}
+	return "."
+}
+
+// topCounts keeps the n highest-count entries, breaking ties by key so a
+// capped map is reproducible across runs.
+func topCounts(m map[string]int, n int) map[string]int {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if m[keys[i]] != m[keys[j]] {
+			return m[keys[i]] > m[keys[j]]
+		}
+		return keys[i] < keys[j]
+	})
+	if len(keys) > n {
+		keys = keys[:n]
+	}
+	out := make(map[string]int, len(keys))
+	for _, k := range keys {
+		out[k] = m[k]
+	}
+	return out
+}
+
+// searchInBlob scans one file's content, counting every match and
+// appending only those that fit under limit. Returning the count rather
+// than stopping at limit is what lets summary report a true total: the
+// row cap bounds the payload, not the scan. Returns the match count and
+// whether the scan-wide ceiling was reached.
+func (s *Server) searchInBlob(resp *SearchSourceResponse, path string, content, pattern []byte, re *regexp.Regexp, ctxLines, limit int) (int, bool) {
 	lines := bytes.Split(content, []byte{'\n'})
 	if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
 		lines = lines[:len(lines)-1]
+	}
+	n := 0
+	record := func(lineNum, col int, matchText []byte) bool {
+		n++
+		if len(resp.Matches) < limit {
+			resp.Matches = append(resp.Matches, s.buildSearchMatch(path, lineNum, col, matchText, content, ctxLines, re != nil))
+		}
+		return resp.Summary.Total+n >= searchSourceScanLimit
 	}
 	for i, line := range lines {
 		lineNum := i + 1
 		if re != nil {
 			for _, h := range re.FindAllIndex(line, -1) {
-				resp.Matches = append(resp.Matches, s.buildSearchMatch(path, hash, lineNum, h[0]+1, line[h[0]:h[1]], content, ctxLines))
-				if len(resp.Matches) >= limit {
-					return true
+				if record(lineNum, h[0]+1, line[h[0]:h[1]]) {
+					return n, true
 				}
 			}
 			continue
@@ -689,23 +813,34 @@ func (s *Server) searchInBlob(resp *SearchSourceResponse, path, hash string, con
 				break
 			}
 			col := start + idx + 1
-			resp.Matches = append(resp.Matches, s.buildSearchMatch(path, hash, lineNum, col, pattern, content, ctxLines))
-			if len(resp.Matches) >= limit {
-				return true
+			if record(lineNum, col, pattern) {
+				return n, true
 			}
 			start = start + idx + len(pattern)
 		}
 	}
-	return false
+	return n, false
 }
 
-func (s *Server) buildSearchMatch(path, hash string, line, col int, matchText, content []byte, ctxLines int) SearchMatch {
-	loc := Location{Path: path, Line: line, Column: col, BlobHash: hash}
-	if s.opts.ProjectRoot != "" && !filepath.IsAbs(path) {
-		loc.AbsolutePath = filepath.Join(s.opts.ProjectRoot, filepath.FromSlash(path))
+// buildSearchMatch omits blob_hash and absolute_path — see SearchMatch —
+// and echoes match_text only for a regex, where it is the one thing the
+// caller cannot reconstruct from the pattern.
+func (s *Server) buildSearchMatch(path string, line, col int, matchText, content []byte, ctxLines int, isRegex bool) SearchMatch {
+	m := SearchMatch{Location: Location{Path: path, Line: line, Column: col}}
+	m.Location.Snippet = extractSnippet(content, line, ctxLines)
+	if isRegex {
+		m.MatchText = string(matchText)
 	}
-	loc.Snippet = extractSnippet(content, line, ctxLines)
-	return SearchMatch{Location: loc, MatchText: string(matchText)}
+	return m
+}
+
+// absolutePathFor mirrors the Location rule: only meaningful when serve
+// was given --project-root, and never for an already-absolute path.
+func (s *Server) absolutePathFor(path string) string {
+	if s.opts.ProjectRoot == "" || filepath.IsAbs(path) {
+		return ""
+	}
+	return filepath.Join(s.opts.ProjectRoot, filepath.FromSlash(path))
 }
 
 func clampRange(v, lo, hi int) int {
