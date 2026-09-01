@@ -35,6 +35,20 @@ import (
 // an order. A record whose separator matches neither form is dropped: a
 // reversed inline edge would be worse than a missing one.
 
+// SupportedOptRecordFormat is the value of element [0]'s "format" key
+// this parser understands. The layout below — a 3-element array whose
+// second element is the pass tree and third the records — is what that
+// version guarantees. A bumped format is refused rather than parsed
+// leniently: the failure mode of guessing is an empty inline plane with
+// nothing saying it went empty, which is the exact blind spot this
+// parser exists to close.
+const SupportedOptRecordFormat = "1"
+
+// optMeta is element [0].
+type optMeta struct {
+	Format string `json:"format"`
+}
+
 // optPass is one node of the pass tree in element [1].
 type optPass struct {
 	ID        string    `json:"id"`
@@ -88,6 +102,17 @@ func ParseOptRecord(r io.Reader) (*OptRecordDump, error) {
 	}
 	if len(top) < 3 {
 		return nil, fmt.Errorf("expected 3 top-level elements, got %d", len(top))
+	}
+
+	var meta optMeta
+	if err := json.Unmarshal(top[0], &meta); err != nil {
+		return nil, fmt.Errorf("metadata: %w", err)
+	}
+	if meta.Format != SupportedOptRecordFormat {
+		return nil, fmt.Errorf(
+			"unsupported optimization-record format %q (this build understands %q); "+
+				"the record layout may have changed — update internal/gccdump/optrecord.go",
+			meta.Format, SupportedOptRecordFormat)
 	}
 
 	var tree []optPass

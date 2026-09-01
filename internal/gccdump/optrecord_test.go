@@ -2,6 +2,7 @@ package gccdump_test
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/yerden/herbarium/internal/gccdump"
@@ -112,5 +113,19 @@ func TestParseOptRecordDropsNonInlineRecords(t *testing.T) {
 			t.Errorf("duplicate record for %v", k)
 		}
 		seen[k] = true
+	}
+}
+
+// A future GCC that bumps the record format must fail loudly. Parsing a
+// changed layout leniently would yield zero inline records and no signal
+// that the plane went empty.
+func TestParseOptRecordRefusesUnknownFormat(t *testing.T) {
+	body := `[{"format":"2","generator":{"name":"GNU C"}},[],[]]`
+	_, err := gccdump.ParseOptRecord(strings.NewReader(body))
+	if err == nil {
+		t.Fatal("format 2 parsed without error")
+	}
+	if !strings.Contains(err.Error(), `"2"`) || !strings.Contains(err.Error(), gccdump.SupportedOptRecordFormat) {
+		t.Errorf("error should name both versions: %v", err)
 	}
 }
