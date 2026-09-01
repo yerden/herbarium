@@ -4,9 +4,44 @@ import (
 	"context"
 	"database/sql"
 	"sort"
+	"strconv"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
+
+const (
+	// inlineRowDefaultLimit caps each row array. It is deliberately small:
+	// a row costs ~400 bytes without a snippet and ~700 with one, three
+	// arrays ship in one response, and an aggressively-inlined caller can
+	// have thousands of rows — enough to blow an MCP client's output limit
+	// and get the whole payload truncated by the harness. The summary
+	// block carries exact totals regardless of this cap, so the compact
+	// answer stays complete even when the rows are a sample.
+	inlineRowDefaultLimit = 50
+	inlineRowMaxLimit     = 1000
+	// verdictScanLimit bounds the rows explain_call reads to decide a
+	// verdict. It is not the user-facing cap: a verdict computed from a
+	// truncated set could be flatly wrong (the one object with a surviving
+	// body might be the row that got cut), so the decision always sees
+	// everything and only the echoed evidence is capped.
+	verdictScanLimit = 10000
+)
+
+// inlineQuery carries the two knobs the row helpers share.
+type inlineQuery struct {
+	limit    int
+	snippets bool
+}
+
+// inlineQueryFromRequest reads the limit / include_snippets arguments.
+// Snippets default to off: they roughly double a row and every location
+// can be re-read with read_source when the agent actually wants context.
+func inlineQueryFromRequest(req mcp.CallToolRequest) inlineQuery {
+	return inlineQuery{
+		limit:    clampRange(req.GetInt("limit", inlineRowDefaultLimit), 1, inlineRowMaxLimit),
+		snippets: req.GetBool("include_snippets", false),
+	}
+}
 
 // registerCallGraphRuntimeTools wires the post-optimization view:
 // list_linked_callers, list_linked_callees (objdump-derived edges,
@@ -60,10 +95,19 @@ func (s *Server) registerCallGraphRuntimeTools() {
 				"`cgraph_edges` is the older per-edge view from the .cgraph "+
 				"`(inlined)` tag, IPA-stage only — a cross-check, not an answer. "+
 				"For a verdict on one specific call rather than a survey of all of "+
-				"them, use explain_call.",
+				"them, use explain_call. Read `summary` first: it counts every row "+
+				"across all three planes (totals, by pass, by inline depth) and "+
+				"stays exact even when the row arrays are capped — for a heavily "+
+				"inlined function those arrays are a sample, not the whole set, and "+
+				"`truncated` says so.",
 		),
 		mcp.WithString("caller_usr", mcp.Required(),
 			mcp.Description("USR of the caller (from find_symbol.hits[].usr or describe_symbol.usr).")),
+		mcp.WithNumber("limit",
+			mcp.Description("Cap on rows per array; default 50, max 1000. `summary` counts every row regardless."),
+			mcp.Min(1)),
+		mcp.WithBoolean("include_snippets",
+			mcp.Description("Attach a ±5-line source window to each location. Off by default: it roughly doubles the payload, and read_source fetches context for the one location you care about.")),
 	), s.handleDescribeInlining)
 
 	s.mcp.AddTool(newTool("list_inline_instances",
@@ -74,10 +118,16 @@ func (s *Server) registerCallGraphRuntimeTools() {
 				"away. `instances` are the folds whose code survived into an object "+
 				"(DWARF); `records` are the decisions GCC logged, rejections "+
 				"included. A function with instances but no linked callers was "+
-				"inlined everywhere, not dead.",
+				"inlined everywhere, not dead. `summary` counts every row and is "+
+				"exact even when the arrays are capped.",
 		),
 		mcp.WithString("callee_usr", mcp.Required(),
 			mcp.Description("USR of the function that may have been inlined (from find_symbol.hits[].usr).")),
+		mcp.WithNumber("limit",
+			mcp.Description("Cap on rows per array; default 50, max 1000. `summary` counts every row regardless."),
+			mcp.Min(1)),
+		mcp.WithBoolean("include_snippets",
+			mcp.Description("Attach a ±5-line source window to each location. Off by default: it roughly doubles the payload, and read_source fetches context for the one location you care about.")),
 	), s.handleListInlineInstances)
 
 	s.mcp.AddTool(newTool("explain_call",
@@ -103,6 +153,11 @@ func (s *Server) registerCallGraphRuntimeTools() {
 			mcp.Description("USR of the called function (from find_symbol.hits[].usr).")),
 		mcp.WithString("target",
 			mcp.Description("Optional target name; restricts the linked_edge evidence to that binary's objdump view.")),
+		mcp.WithNumber("limit",
+			mcp.Description("Cap on evidence rows per array; default 50, max 1000. The verdict is always decided from the full set, capped or not."),
+			mcp.Min(1)),
+		mcp.WithBoolean("include_snippets",
+			mcp.Description("Attach a ±5-line source window to each evidence location. Off by default.")),
 	), s.handleExplainCall)
 }
 
@@ -272,6 +327,9 @@ type InlineInstanceRow struct {
 // because it is the only plane that sees every pass.
 type DescribeInliningResponse struct {
 	CallerUSR string `json:"caller_usr"`
+	// Summary counts every matching row, so it stays true when the arrays
+	// below are capped. Read it first.
+	Summary InliningSummary `json:"summary"`
 	// Records is every pass's verdict, the early inliner included, with
 	// GCC's own reason on each rejection.
 	Records []InlineRecordRow `json:"records"`
@@ -280,13 +338,18 @@ type DescribeInliningResponse struct {
 	// CgraphEdges is the legacy IPA-stage per-edge view, kept as an
 	// independent cross-check rather than as an answer in its own right.
 	CgraphEdges []CgraphInlineEdge `json:"cgraph_edges"`
+	// Truncated is true when any array hit the row cap. Summary still
+	// holds the real totals; raise `limit` or aggregate with sql_query.
+	Truncated bool `json:"truncated"`
 }
 
 // ListInlineInstancesResponse is what list_inline_instances returns.
 type ListInlineInstancesResponse struct {
 	CalleeUSR string              `json:"callee_usr"`
+	Summary   InliningSummary     `json:"summary"`
 	Instances []InlineInstanceRow `json:"instances"`
 	Records   []InlineRecordRow   `json:"records"`
+	Truncated bool                `json:"truncated"`
 }
 
 func (s *Server) handleDescribeInlining(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -322,19 +385,30 @@ func (s *Server) handleDescribeInlining(_ context.Context, req mcp.CallToolReque
 	if err := rows.Err(); err != nil {
 		return mcp.NewToolResultError("iterate: " + err.Error()), nil
 	}
-	records, err := s.inlineRecords("r.caller_id = ?", callerID)
+	q := inlineQueryFromRequest(req)
+	records, recTrunc, err := s.inlineRecords(q, "r.caller_id = ?", callerID)
 	if err != nil {
 		return mcp.NewToolResultError("describe_inlining: " + err.Error()), nil
 	}
-	instances, err := s.inlineInstances("i.caller_id = ?", callerID)
+	instances, instTrunc, err := s.inlineInstances(q, "i.caller_id = ?", callerID)
 	if err != nil {
 		return mcp.NewToolResultError("describe_inlining: " + err.Error()), nil
+	}
+	summary, err := s.inliningSummary("caller_id", callerID)
+	if err != nil {
+		return mcp.NewToolResultError("describe_inlining: " + err.Error()), nil
+	}
+	edgesTrunc := len(out) > q.limit
+	if edgesTrunc {
+		out = out[:q.limit]
 	}
 	return jsonResult(DescribeInliningResponse{
 		CallerUSR:   usr,
+		Summary:     summary,
 		Records:     records,
 		Instances:   instances,
 		CgraphEdges: out,
+		Truncated:   recTrunc || instTrunc || edgesTrunc,
 	})
 }
 
@@ -349,18 +423,25 @@ func (s *Server) handleListInlineInstances(_ context.Context, req mcp.CallToolRe
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	instances, err := s.inlineInstances("i.callee_id = ?", calleeID)
+	q := inlineQueryFromRequest(req)
+	instances, instTrunc, err := s.inlineInstances(q, "i.callee_id = ?", calleeID)
 	if err != nil {
 		return mcp.NewToolResultError("list_inline_instances: " + err.Error()), nil
 	}
-	records, err := s.inlineRecords("r.callee_id = ?", calleeID)
+	records, recTrunc, err := s.inlineRecords(q, "r.callee_id = ?", calleeID)
+	if err != nil {
+		return mcp.NewToolResultError("list_inline_instances: " + err.Error()), nil
+	}
+	summary, err := s.inliningSummary("callee_id", calleeID)
 	if err != nil {
 		return mcp.NewToolResultError("list_inline_instances: " + err.Error()), nil
 	}
 	return jsonResult(ListInlineInstancesResponse{
 		CalleeUSR: usr,
+		Summary:   summary,
 		Instances: instances,
 		Records:   records,
+		Truncated: instTrunc || recTrunc,
 	})
 }
 
@@ -399,6 +480,9 @@ type ExplainCallEvidence struct {
 	// True alongside an inline verdict is normal: a callee can be inlined
 	// at one site and called at another.
 	LinkedEdge bool `json:"linked_edge"`
+	// Truncated says the arrays above were capped. The verdict is not
+	// affected — it is always decided from the full set.
+	Truncated bool `json:"truncated"`
 }
 
 // ExplainCallResponse is what explain_call returns.
@@ -444,16 +528,37 @@ func (s *Server) handleExplainCall(_ context.Context, req mcp.CallToolRequest) (
 		return mcp.NewToolResultError("explain_call: callee: " + err.Error()), nil
 	}
 
-	records, err := s.inlineRecords("r.caller_id = ? AND r.callee_id = ?", callerID, calleeID)
+	// The verdict reads everything; only the echoed evidence is capped.
+	// A verdict decided from a truncated set could be flatly wrong — the
+	// one object with a surviving body might be the row that got cut.
+	scan := inlineQuery{limit: verdictScanLimit}
+	records, _, err := s.inlineRecords(scan, "r.caller_id = ? AND r.callee_id = ?", callerID, calleeID)
 	if err != nil {
 		return mcp.NewToolResultError("explain_call: " + err.Error()), nil
 	}
-	instances, err := s.inlineInstances("i.caller_id = ? AND i.callee_id = ?", callerID, calleeID)
+	instances, _, err := s.inlineInstances(scan, "i.caller_id = ? AND i.callee_id = ?", callerID, calleeID)
 	if err != nil {
 		return mcp.NewToolResultError("explain_call: " + err.Error()), nil
 	}
-	resp.Evidence.Records = records
-	resp.Evidence.Instances = instances
+
+	q := inlineQueryFromRequest(req)
+	resp.Evidence.Records, resp.Evidence.Instances = records, instances
+	if len(records) > q.limit {
+		resp.Evidence.Records = records[:q.limit]
+		resp.Evidence.Truncated = true
+	}
+	if len(instances) > q.limit {
+		resp.Evidence.Instances = instances[:q.limit]
+		resp.Evidence.Truncated = true
+	}
+	if q.snippets {
+		for i := range resp.Evidence.Records {
+			s.enrichLocation(&resp.Evidence.Records[i].Location, true)
+		}
+		for i := range resp.Evidence.Instances {
+			s.enrichLocation(&resp.Evidence.Instances[i].Location, true)
+		}
+	}
 
 	// MAX() over no rows yields one NULL row rather than ErrNoRows, so
 	// the nullable scan is what distinguishes "no cgraph edge" from
@@ -558,10 +663,87 @@ func overallVerdict(per []ObjectInlineVerdict) (verdict, reason string) {
 	return first, ""
 }
 
+// InliningSummary is the aggregate view, computed over every matching
+// row regardless of the row cap. It exists because the useful default
+// answer to "what happened to this function's calls" is counts, not a
+// few hundred near-identical rows — and because a caller that hits the
+// cap still needs a true total to know what it is not seeing.
+type InliningSummary struct {
+	Records         int            `json:"records"`
+	RecordsInlined  int            `json:"records_inlined"`
+	RecordsDeclined int            `json:"records_declined"`
+	RecordsByPass   map[string]int `json:"records_by_pass"`
+	Instances       int            `json:"instances"`
+	// InstancesByDepth is keyed by depth as a string ("1", "2") because
+	// JSON object keys are strings; depth 1 means inlined directly.
+	InstancesByDepth map[string]int `json:"instances_by_depth"`
+	CgraphEdges      int            `json:"cgraph_edges"`
+}
+
+// inliningSummary aggregates all three planes for one symbol. col is a
+// literal from the call site — "caller_id" or "callee_id" — never user
+// input.
+func (s *Server) inliningSummary(col string, id int64) (InliningSummary, error) {
+	sum := InliningSummary{
+		RecordsByPass:    map[string]int{},
+		InstancesByDepth: map[string]int{},
+	}
+
+	rows, err := s.db.Query(
+		`SELECT pass, inlined, COUNT(*) FROM inline_records WHERE `+col+` = ? GROUP BY pass, inlined`, id)
+	if err != nil {
+		return sum, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var pass string
+		var inlined, n int
+		if err := rows.Scan(&pass, &inlined, &n); err != nil {
+			return sum, err
+		}
+		sum.Records += n
+		sum.RecordsByPass[pass] += n
+		if inlined == 1 {
+			sum.RecordsInlined += n
+		} else {
+			sum.RecordsDeclined += n
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return sum, err
+	}
+
+	irows, err := s.db.Query(
+		`SELECT depth, COUNT(*) FROM inline_instances WHERE `+col+` = ? GROUP BY depth ORDER BY depth`, id)
+	if err != nil {
+		return sum, err
+	}
+	defer irows.Close()
+	for irows.Next() {
+		var depth, n int
+		if err := irows.Scan(&depth, &n); err != nil {
+			return sum, err
+		}
+		sum.Instances += n
+		sum.InstancesByDepth[strconv.Itoa(depth)] = n
+	}
+	if err := irows.Err(); err != nil {
+		return sum, err
+	}
+
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM inline_decisions WHERE `+col+` = ?`, id,
+	).Scan(&sum.CgraphEdges); err != nil {
+		return sum, err
+	}
+	return sum, nil
+}
+
 // inlineRecords reads inline_records under a caller_id or callee_id
 // predicate. Both tools want the same columns, so the WHERE clause is
 // the only thing that varies.
-func (s *Server) inlineRecords(where string, args ...any) ([]InlineRecordRow, error) {
+func (s *Server) inlineRecords(q inlineQuery, where string, args ...any) ([]InlineRecordRow, bool, error) {
+	args = append(args, q.limit+1)
 	rows, err := s.db.Query(`
 		SELECT cr.usr, cr.name, cr.kind, IFNULL(cr.signature, ''),
 		       ce.usr, ce.name, ce.kind, IFNULL(ce.signature, ''),
@@ -572,9 +754,10 @@ func (s *Server) inlineRecords(where string, args ...any) ([]InlineRecordRow, er
 		JOIN symbols cr ON cr.id = r.caller_id
 		JOIN symbols ce ON ce.id = r.callee_id
 		WHERE `+where+`
-		ORDER BY r.pass, ce.name, r.file, r.line`, args...)
+		ORDER BY r.pass, ce.name, r.file, r.line
+		LIMIT ?`, args...)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer rows.Close()
 	var out []InlineRecordRow
@@ -588,19 +771,27 @@ func (s *Server) inlineRecords(where string, args ...any) ([]InlineRecordRow, er
 			&rec.Callee.USR, &rec.Callee.Name, &rec.Callee.Kind, &rec.Callee.Signature,
 			&rec.Pass, &inlined, &rec.Reason, &file, &line, &col, &rec.Object,
 		); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		rec.Inlined = inlined == 1
 		rec.Location = Location{Path: file, Line: line, Column: col}
-		s.enrichLocation(&rec.Location, true)
+		s.enrichLocation(&rec.Location, q.snippets)
 		out = append(out, rec)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	truncated := len(out) > q.limit
+	if truncated {
+		out = out[:q.limit]
+	}
+	return out, truncated, nil
 }
 
 // inlineInstances reads inline_instances under a caller_id or callee_id
 // predicate.
-func (s *Server) inlineInstances(where string, args ...any) ([]InlineInstanceRow, error) {
+func (s *Server) inlineInstances(q inlineQuery, where string, args ...any) ([]InlineInstanceRow, bool, error) {
+	args = append(args, q.limit+1)
 	rows, err := s.db.Query(`
 		SELECT cr.usr, cr.name, cr.kind, IFNULL(cr.signature, ''),
 		       ce.usr, ce.name, ce.kind, IFNULL(ce.signature, ''),
@@ -612,9 +803,10 @@ func (s *Server) inlineInstances(where string, args ...any) ([]InlineInstanceRow
 		JOIN symbols ce ON ce.id = i.callee_id
 		LEFT JOIN symbols p ON p.id = i.parent_callee_id
 		WHERE `+where+`
-		ORDER BY i.depth, ce.name, i.file, i.line`, args...)
+		ORDER BY i.depth, ce.name, i.file, i.line
+		LIMIT ?`, args...)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer rows.Close()
 	var out []InlineInstanceRow
@@ -629,14 +821,21 @@ func (s *Server) inlineInstances(where string, args ...any) ([]InlineInstanceRow
 			&inst.Depth, &parent.USR, &parent.Name, &parent.Kind,
 			&file, &line, &col, &inst.Object,
 		); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if parent.USR != "" {
 			inst.ParentCallee = &parent
 		}
 		inst.Location = Location{Path: file, Line: line, Column: col}
-		s.enrichLocation(&inst.Location, true)
+		s.enrichLocation(&inst.Location, q.snippets)
 		out = append(out, inst)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	truncated := len(out) > q.limit
+	if truncated {
+		out = out[:q.limit]
+	}
+	return out, truncated, nil
 }

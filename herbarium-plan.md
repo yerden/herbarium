@@ -415,13 +415,14 @@ When `herbarium serve` is launched with `--project-root <path>`, responses addit
 **`list_linked_callees(caller_usr, target)`** — outgoing calls per `objdump`.
 *Benefit:* symmetric ground truth.
 
-**`describe_inlining(caller_usr)`** — what happened to this function's calls, across all three inlining planes: `records` (every pass's decision, rejections and reasons included, from the optimization record), `instances` (the inlined bodies DWARF says survived into the object), `cgraph_edges` (the older `.cgraph` per-edge tag, IPA-stage only, kept as a cross-check rather than an answer).
+**`describe_inlining(caller_usr, limit?, include_snippets?)`** — what happened to this function's calls, across all three inlining planes: `records` (every pass's decision, rejections and reasons included, from the optimization record), `instances` (the inlined bodies DWARF says survived into the object), `cgraph_edges` (the older `.cgraph` per-edge tag, IPA-stage only, kept as a cross-check rather than an answer). Summary-first: `summary` aggregates every matching row (totals, by pass, by inline depth) while the arrays are capped, because a heavily inlined caller has enough rows to exceed an MCP client's output limit and get the whole response truncated — a cap the tool controls beats a truncation it does not.
 *Benefit:* reconciles the two callgraph views so the agent knows whether a source-level edge exists in the binary — and, when the planes disagree, says which stage lost it.
 
 **`list_inline_instances(callee_usr)`** — the reverse: everywhere this function's body was inlined into another.
 *Benefit:* answers "where did this helper go?" for a symbol with no runtime callers. A function with instances but no linked callers was inlined everywhere, not dead.
 
-**`explain_call(caller_usr, callee_usr, target?)`** — one verdict for one call, plus the evidence: `inlined_and_present`, `inlined_then_folded`, `declined` (with GCC's own reason), `no_decision_logged`, or `mixed` when a USR's TUs decided differently.
+**`explain_call(caller_usr, callee_usr, target?, limit?, include_snippets?)`** — one verdict for one call, plus the evidence: `inlined_and_present`, `inlined_then_folded`, `declined` (with GCC's own reason), `no_decision_logged`, or `mixed` when a USR's TUs decided differently.
+The verdict is decided from the full row set even when the echoed evidence is capped; a verdict derived from truncated rows could name the wrong outcome.
 *Benefit:* the three planes are the right shape for storage and the wrong shape for a consumer — an agent asking about a single call should not have to know GCC's pass pipeline to route its own question. Verdicts are per-object, joined on the `.o`, so "inlined then folded" is never confused with "the body landed in another TU".
 
 ### Indirect calls and function-pointer dispatch

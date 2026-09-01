@@ -69,6 +69,8 @@ Groups:
 - **Symbols:** `find_symbol` (FTS5 with prefix tokens), `describe_symbol` (multi-def + linkage_names + reachability + link_resolutions).
 - **Call graph, source view:** `list_callers`, `list_callees`, `list_call_paths` (in-memory DFS, cycle-in-path guard, max_depth cap).
 - **Call graph, runtime view:** `list_linked_callers`, `list_linked_callees`, `describe_inlining` (three planes: `records`, `instances`, `cgraph_edges`), `list_inline_instances`, `explain_call` (one verdict for one call, with its evidence).
+
+**Response-size contract for the inlining tools.** They answer summary-first: `summary` (exact totals, by pass, by inline depth) is computed over every matching row, the row arrays are capped at 50 (`limit`, max 1000) with a `truncated` flag, and snippets are off unless `include_snippets=true`. This is not tidiness — a row costs ~500 bytes without a snippet and ~700 with one, three arrays ship in one response, and an aggressively inlined caller produced enough rows to exceed an MCP client's output limit and have the *whole* payload truncated by the harness, which is worse than any cap. `explain_call` is the exception that proves the rule: its verdict is always decided from the full row set (`verdictScanLimit`) and only the echoed evidence is capped, because a verdict computed from truncated rows could be flatly wrong.
 - **Indirect:** `list_indirect_call_sites`, `list_address_taken_functions`, `resolve_indirect_call`, `list_devirt_hints`.
 - **Linkage + reachability:** `describe_link_resolution`, `list_weak_symbols`, `list_undefined_symbols`, `list_icf_groups`, `list_unreachable_symbols`, `list_entry_points`.
 

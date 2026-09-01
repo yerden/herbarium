@@ -82,7 +82,7 @@ The 29 tools are grouped by concern. Every location-returning tool wraps its pos
 
 **Call graph, source view** — `list_callers`, `list_callees`, `list_call_paths`.
 
-**Call graph, runtime view** — `list_linked_callers`, `list_linked_callees`, `describe_inlining` (three planes: every pass's decisions from the optimization record, the inlined bodies DWARF says survived, and the older `.cgraph` per-edge tag as a cross-check), `list_inline_instances` (where a function's body ended up), `explain_call` (one verdict for one call — `inlined_and_present`, `inlined_then_folded`, `declined` with GCC's reason, or `no_decision_logged` — plus the evidence behind it).
+**Call graph, runtime view** — `list_linked_callers`, `list_linked_callees`, `describe_inlining` (three planes: every pass's decisions from the optimization record, the inlined bodies DWARF says survived, and the older `.cgraph` per-edge tag as a cross-check), `list_inline_instances` (where a function's body ended up), `explain_call` (one verdict for one call — `inlined_and_present`, `inlined_then_folded`, `declined` with GCC's reason, or `no_decision_logged` — plus the evidence behind it). All three answer summary-first: exact totals always, row arrays capped at 50 (`limit`), source snippets only on request.
 
 **Indirect calls** — `list_indirect_call_sites`, `list_address_taken_functions`, `resolve_indirect_call`, `list_devirt_hints`.
 
