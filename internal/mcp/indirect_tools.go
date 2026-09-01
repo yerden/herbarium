@@ -35,6 +35,8 @@ func (s *Server) registerIndirectTools() {
 			mcp.Description("Filter by callee signature, e.g. 'int (int, int)'. Same form as describe_symbol.signature, so a value from either tool matches here.")),
 		mcp.WithString("target",
 			mcp.Description("Restrict to sites whose caller is reachable in this target.")),
+		limitArg(indirectSitesLimit),
+		snippetArg(),
 	), s.handleListIndirectCallSites)
 
 	s.mcp.AddTool(newTool("list_address_taken_functions",
@@ -96,6 +98,8 @@ func (s *Server) handleListIndirectCallSites(_ context.Context, req mcp.CallTool
 	callerUSR := req.GetString("caller_usr", "")
 	calleeType := req.GetString("callee_type", "")
 	target := req.GetString("target", "")
+	limit := rowLimit(req, indirectSitesLimit)
+	snippets := wantSnippets(req)
 
 	sqlText := `
 		SELECT ics.id, s.usr, s.name, s.kind, IFNULL(s.signature, ''),
@@ -122,7 +126,7 @@ func (s *Server) handleListIndirectCallSites(_ context.Context, req mcp.CallTool
 		args = append(args, target)
 	}
 	sqlText += ` ORDER BY ics.file, ics.line, ics.column LIMIT ?`
-	args = append(args, indirectSitesLimit+1)
+	args = append(args, limit+1)
 
 	rows, err := s.db.Query(sqlText, args...)
 	if err != nil {
@@ -143,15 +147,15 @@ func (s *Server) handleListIndirectCallSites(_ context.Context, req mcp.CallTool
 			return mcp.NewToolResultError("scan: " + err.Error()), nil
 		}
 		site.Location = Location{Path: file, Line: line, Column: col}
-		s.enrichLocation(&site.Location, true)
+		s.enrichLocation(&site.Location, snippets)
 		out = append(out, site)
 	}
 	if err := rows.Err(); err != nil {
 		return mcp.NewToolResultError("iterate: " + err.Error()), nil
 	}
-	truncated := len(out) > indirectSitesLimit
+	truncated := len(out) > limit
 	if truncated {
-		out = out[:indirectSitesLimit]
+		out = out[:limit]
 	}
 	return jsonResult(ListIndirectCallSitesResponse{
 		Sites:     out,

@@ -226,3 +226,74 @@ func TestListEntryPoints(t *testing.T) {
 		t.Errorf("entry points missing main: %+v", payload.Points)
 	}
 }
+
+// Same payload contract as the inlining tools: these two return sets
+// that scale with the project, so they cap and say when they did.
+func TestLinkageToolsRowCaps(t *testing.T) {
+	client := startClient(t, fixtureHBR(t))
+	callTool := func(t *testing.T, name string, args map[string]any, out any) {
+		t.Helper()
+		req := mcp.CallToolRequest{}
+		req.Params.Name = name
+		req.Params.Arguments = args
+		res, err := client.CallTool(context.Background(), req)
+		if err != nil {
+			t.Fatalf("CallTool %s: %v", name, err)
+		}
+		if res.IsError {
+			t.Fatalf("%s error: %s", name, textOf(t, res))
+		}
+		if err := json.Unmarshal([]byte(textOf(t, res)), out); err != nil {
+			t.Fatalf("unmarshal %s: %v", name, err)
+		}
+	}
+
+	t.Run("list_unreachable_symbols", func(t *testing.T) {
+		var full herbmcp.ListUnreachableSymbolsResponse
+		callTool(t, "list_unreachable_symbols", map[string]any{"target": "app1"}, &full)
+		if full.Truncated {
+			t.Fatalf("fixture truncated at the default cap: %d rows", full.Total)
+		}
+		if full.Total < 2 {
+			t.Fatalf("need ≥2 unreachable symbols to exercise the cap; got %d", full.Total)
+		}
+		var capped herbmcp.ListUnreachableSymbolsResponse
+		callTool(t, "list_unreachable_symbols", map[string]any{"target": "app1", "limit": 1}, &capped)
+		if len(capped.Symbols) != 1 || !capped.Truncated {
+			t.Errorf("limit=1 -> %d rows, truncated=%v", len(capped.Symbols), capped.Truncated)
+		}
+	})
+
+	t.Run("list_entry_points", func(t *testing.T) {
+		var full herbmcp.ListEntryPointsResponse
+		callTool(t, "list_entry_points", map[string]any{"target": "app1"}, &full)
+		if full.Truncated {
+			t.Fatalf("fixture truncated at the default cap: %d rows", full.Total)
+		}
+		for _, p := range full.Points {
+			if p.Location.Snippet != nil {
+				t.Fatalf("snippet without include_snippets: %+v", p.Location)
+			}
+		}
+		if full.Total < 2 {
+			t.Fatalf("need ≥2 entry points to exercise the cap; got %d", full.Total)
+		}
+		var capped herbmcp.ListEntryPointsResponse
+		callTool(t, "list_entry_points", map[string]any{"target": "app1", "limit": 1}, &capped)
+		if len(capped.Points) != 1 || !capped.Truncated {
+			t.Errorf("limit=1 -> %d rows, truncated=%v", len(capped.Points), capped.Truncated)
+		}
+
+		var withSnip herbmcp.ListEntryPointsResponse
+		callTool(t, "list_entry_points", map[string]any{"target": "app1", "include_snippets": true}, &withSnip)
+		var sawSnippet bool
+		for _, p := range withSnip.Points {
+			if p.Location.Snippet != nil {
+				sawSnippet = true
+			}
+		}
+		if !sawSnippet {
+			t.Error("include_snippets=true returned no snippets")
+		}
+	})
+}

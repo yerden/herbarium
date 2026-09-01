@@ -89,6 +89,7 @@ func (s *Server) registerLinkageTools() {
 		),
 		mcp.WithString("target", mcp.Required(),
 			mcp.Description("Target binary name — reachability is per-target.")),
+		limitArg(linkageRowLimit),
 	), s.handleListUnreachableSymbols)
 
 	s.mcp.AddTool(newTool("list_entry_points",
@@ -102,8 +103,16 @@ func (s *Server) registerLinkageTools() {
 		),
 		mcp.WithString("target", mcp.Required(),
 			mcp.Description("Target binary name — entry points are per-target.")),
+		limitArg(linkageRowLimit),
+		snippetArg(),
 	), s.handleListEntryPoints)
 }
+
+// linkageRowLimit caps the two tools here whose result set scales with
+// the project rather than with the query: an executable can leave
+// thousands of symbols unreachable and a shared library can export
+// thousands of entry points.
+const linkageRowLimit = 500
 
 // -- describe_link_resolution -----------------------------------------
 
@@ -433,6 +442,11 @@ type ListUnreachableSymbolsResponse struct {
 	Target  string              `json:"target"`
 	Symbols []UnreachableSymbol `json:"symbols"`
 	Total   int                 `json:"total"`
+	// Truncated is true when the row cap bit. The set scales with the
+	// project — a dead-symbol list on a real executable runs long — so
+	// raise `limit` or aggregate with sql_query rather than assuming the
+	// list is complete.
+	Truncated bool `json:"truncated"`
 }
 
 func (s *Server) handleListUnreachableSymbols(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -444,6 +458,8 @@ func (s *Server) handleListUnreachableSymbols(_ context.Context, req mcp.CallToo
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+
+	limit := rowLimit(req, linkageRowLimit)
 
 	// symbol_reachability is a view derived from link_resolutions: absence
 	// of a link_resolutions row for (target, symbol) is exactly the old
@@ -459,7 +475,8 @@ func (s *Server) handleListUnreachableSymbols(_ context.Context, req mcp.CallToo
 		  AND NOT EXISTS (
 		    SELECT 1 FROM link_resolutions lr
 		    WHERE lr.target_id = ? AND lr.usr = s.usr)
-		ORDER BY s.name`, targetID, targetID)
+		ORDER BY s.name
+		LIMIT ?`, targetID, targetID, limit+1)
 	if err != nil {
 		return mcp.NewToolResultError("list_unreachable_symbols: " + err.Error()), nil
 	}
@@ -477,7 +494,13 @@ func (s *Server) handleListUnreachableSymbols(_ context.Context, req mcp.CallToo
 	if err := rows.Err(); err != nil {
 		return mcp.NewToolResultError("iterate: " + err.Error()), nil
 	}
-	return jsonResult(ListUnreachableSymbolsResponse{Target: target, Symbols: out, Total: len(out)})
+	truncated := len(out) > limit
+	if truncated {
+		out = out[:limit]
+	}
+	return jsonResult(ListUnreachableSymbolsResponse{
+		Target: target, Symbols: out, Total: len(out), Truncated: truncated,
+	})
 }
 
 // -- list_entry_points -----------------------------------------------
@@ -491,10 +514,11 @@ type EntryPoint struct {
 
 // ListEntryPointsResponse is what list_entry_points returns.
 type ListEntryPointsResponse struct {
-	Target string       `json:"target"`
-	Points []EntryPoint `json:"points"`
-	Total  int          `json:"total"`
-	Note   string       `json:"note,omitempty"`
+	Target    string       `json:"target"`
+	Points    []EntryPoint `json:"points"`
+	Total     int          `json:"total"`
+	Truncated bool         `json:"truncated"`
+	Note      string       `json:"note,omitempty"`
 }
 
 func (s *Server) handleListEntryPoints(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -506,6 +530,9 @@ func (s *Server) handleListEntryPoints(_ context.Context, req mcp.CallToolReques
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+
+	limit := rowLimit(req, linkageRowLimit)
+	snippets := wantSnippets(req)
 
 	// Two categories: main + external-linkage symbols. Constructor-
 	// attributed functions and .init_array entries would need a DWARF
@@ -525,7 +552,12 @@ func (s *Server) handleListEntryPoints(_ context.Context, req mcp.CallToolReques
 	defer rows.Close()
 	seen := map[string]bool{}
 	var out []EntryPoint
+	// The cap counts distinct symbols, and dedup happens here rather than
+	// in SQL, so a LIMIT in the query would under-fill the page.
 	for rows.Next() {
+		if len(out) > limit {
+			break
+		}
 		var ep EntryPoint
 		var linkage, file string
 		var line int
@@ -543,15 +575,19 @@ func (s *Server) handleListEntryPoints(_ context.Context, req mcp.CallToolReques
 		}
 		if file != "" {
 			ep.Location = Location{Path: file, Line: line}
-			s.enrichLocation(&ep.Location, false)
+			s.enrichLocation(&ep.Location, snippets)
 		}
 		out = append(out, ep)
 	}
 	if err := rows.Err(); err != nil {
 		return mcp.NewToolResultError("iterate: " + err.Error()), nil
 	}
+	truncated := len(out) > limit
+	if truncated {
+		out = out[:limit]
+	}
 	return jsonResult(ListEntryPointsResponse{
-		Target: target, Points: out, Total: len(out),
+		Target: target, Points: out, Total: len(out), Truncated: truncated,
 		Note: "Constructor-attributed (__attribute__((constructor))) and .init_array entries are not currently classified.",
 	})
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // snippetContext is the ±line window every location-returning tool
@@ -30,6 +31,36 @@ type Location struct {
 	BlobHash     string   `json:"blob_hash,omitempty"`
 	Snippet      *Snippet `json:"snippet,omitempty"`
 	AbsolutePath string   `json:"absolute_path,omitempty"` // only when serve --project-root is set
+}
+
+// Conventional row-cap bounds shared by the tools that can return an
+// unbounded set. A response the client truncates is worse than a capped
+// one: the caller cannot tell what it lost, or that it lost anything.
+const rowLimitMax = 2000
+
+// rowLimit reads the conventional `limit` argument.
+func rowLimit(req mcp.CallToolRequest, def int) int {
+	return clampRange(req.GetInt("limit", def), 1, rowLimitMax)
+}
+
+// wantSnippets reads the conventional `include_snippets` argument. Off by
+// default everywhere it appears: a ±5-line window roughly doubles a row,
+// and read_source fetches context for the one location that matters.
+func wantSnippets(req mcp.CallToolRequest) bool {
+	return req.GetBool("include_snippets", false)
+}
+
+// limitArg and snippetArg declare the two conventional options, kept
+// here so the wording stays identical across the tool set.
+func limitArg(def int) mcp.ToolOption {
+	return mcp.WithNumber("limit",
+		mcp.Description(fmt.Sprintf("Cap on returned rows; default %d, max %d. `truncated` says when it bit.", def, rowLimitMax)),
+		mcp.Min(1))
+}
+
+func snippetArg() mcp.ToolOption {
+	return mcp.WithBoolean("include_snippets",
+		mcp.Description("Attach a ±5-line source window to each location. Off by default: it roughly doubles the payload, and read_source fetches context for the one location you care about."))
 }
 
 // Snippet is the ±snippetContext window returned inside a Location.

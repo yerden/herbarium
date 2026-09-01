@@ -229,3 +229,53 @@ func TestListDevirtHintsEmpty(t *testing.T) {
 		t.Errorf("Total = %d, want 0 for fixture", payload.Total)
 	}
 }
+
+// Snippets are the dominant per-row cost, and this tool can return one
+// row per indirect call in a whole target.
+func TestListIndirectCallSitesPayloadLimits(t *testing.T) {
+	client := startClient(t, fixtureHBR(t))
+	call := func(t *testing.T, args map[string]any) herbmcp.ListIndirectCallSitesResponse {
+		t.Helper()
+		req := mcp.CallToolRequest{}
+		req.Params.Name = "list_indirect_call_sites"
+		req.Params.Arguments = args
+		res, err := client.CallTool(context.Background(), req)
+		if err != nil {
+			t.Fatalf("CallTool: %v", err)
+		}
+		if res.IsError {
+			t.Fatalf("error: %s", textOf(t, res))
+		}
+		var payload herbmcp.ListIndirectCallSitesResponse
+		if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return payload
+	}
+
+	bare := call(t, map[string]any{})
+	if bare.Total < 2 {
+		t.Fatalf("need ≥2 sites to exercise the cap; got %d", bare.Total)
+	}
+	for _, s := range bare.Sites {
+		if s.Location.Snippet != nil {
+			t.Fatalf("snippet without include_snippets: %+v", s.Location)
+		}
+	}
+
+	withSnip := call(t, map[string]any{"include_snippets": true})
+	var sawSnippet bool
+	for _, s := range withSnip.Sites {
+		if s.Location.Snippet != nil {
+			sawSnippet = true
+		}
+	}
+	if !sawSnippet {
+		t.Error("include_snippets=true returned no snippets")
+	}
+
+	capped := call(t, map[string]any{"limit": 1})
+	if len(capped.Sites) != 1 || !capped.Truncated {
+		t.Errorf("limit=1 -> %d sites, truncated=%v", len(capped.Sites), capped.Truncated)
+	}
+}
