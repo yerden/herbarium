@@ -180,6 +180,7 @@ func parseSubprogram(e *dwarf.Entry, files []*dwarf.LineFile, tc *typeCache) Sub
 	// no low_pc; they still represent the source definition.
 	if _, hasInline := e.Val(dwarf.AttrInline).(int64); hasInline && !sp.Declaration {
 		sp.Definition = true
+		sp.AbstractInline = true
 	}
 	if ext, ok := e.Val(dwarf.AttrExternal).(bool); ok && ext {
 		sp.External = true

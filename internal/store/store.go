@@ -56,7 +56,18 @@ import (
 // everything the early inliner folded before IPA ran, with nothing in
 // the index recording that the view was partial. Collect now requires
 // -fsave-optimization-record; a v6-era builddir fails preflight.
-const SchemaVersion = "7"
+//
+// v7 → v8: no structural change, but symbol_definitions.file/line changed
+// meaning for one class of row. A function GCC inlined at every call site
+// gets no callgraph-info node, and v7 recorded it at the including TU with
+// line 0 — so a static inline whose body is written in a header claimed to
+// be defined in the .c that included it, and no query on the header could
+// find it. v8 recovers the real location from DWARF's abstract instance
+// root, which is why `file` may now name a .h. The bump exists because
+// serve cannot otherwise tell the two apart: a v7 artifact answers "what
+// is defined in this header" with zero rows and nothing marks the answer
+// as stale. Re-collect to pick up the corrected locations.
+const SchemaVersion = "8"
 
 //go:embed schema.sql
 var schemaSQL string

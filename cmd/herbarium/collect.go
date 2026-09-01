@@ -160,6 +160,7 @@ func runCollect(args []string) int {
 	fmt.Printf("  icf groups:          %d\n", sum.ICFGroups)
 	fmt.Printf("  signatures:          %d\n", dwarfSum.Signatures)
 	fmt.Printf("  decl locations:      %d\n", dwarfSum.DeclLocations)
+	fmt.Printf("  def locations:       %d\n", dwarfSum.DefLocations)
 	fmt.Printf("  indirect sites:      %d\n", dwarfSum.IndirectSites)
 	fmt.Printf("  inline instances:    %d\n", dwarfSum.InlineInstances)
 	fmt.Printf("  link resolutions:    %d\n", linkSum.LinkResolutions)

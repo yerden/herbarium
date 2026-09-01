@@ -106,8 +106,8 @@ func TestListSourceFilesAll(t *testing.T) {
 	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if payload.Total != 9 {
-		t.Errorf("Total = %d, want 9 (fixture files)", payload.Total)
+	if payload.Total != 10 {
+		t.Errorf("Total = %d, want 10 (fixture files)", payload.Total)
 	}
 	// Every file must carry BlobHash and Size.
 	for _, f := range payload.Files {
@@ -164,9 +164,9 @@ func TestListSourceFilesFilters(t *testing.T) {
 			t.Errorf("kind=header returned non-header %q", f.Path)
 		}
 	}
-	// Fixture has 2 headers (include/dispatch.h, lib/shared_utils.h).
-	if payload.Total != 2 {
-		t.Errorf("header count = %d, want 2", payload.Total)
+	// Fixture has 3 headers (include/dispatch.h, lib/hdr_inline.h, lib/shared_utils.h).
+	if payload.Total != 3 {
+		t.Errorf("header count = %d, want 3", payload.Total)
 	}
 
 	// Filter by path_prefix = "app": only app1/*, app2/*.
@@ -596,7 +596,7 @@ func TestSearchSourceLiteral(t *testing.T) {
 	}
 }
 
-// TestSearchSourceMultipleMatchesPerLine: shared_utils.c line 12 has
+// TestSearchSourceMultipleMatchesPerLine: shared_utils.c line 13 has
 // 'add_ints(a, b) + mul_ints(a, b)'; searching '_ints' must surface both
 // on that line as distinct entries with different columns.
 func TestSearchSourceMultipleMatchesPerLine(t *testing.T) {
@@ -618,18 +618,18 @@ func TestSearchSourceMultipleMatchesPerLine(t *testing.T) {
 	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	// Collect matches at line 12; expect exactly two with distinct columns.
-	var line12 []int
+	// Collect matches at line 13; expect exactly two with distinct columns.
+	var line13 []int
 	for _, m := range payload.Matches {
-		if m.Location.Line == 12 {
-			line12 = append(line12, m.Location.Column)
+		if m.Location.Line == 13 {
+			line13 = append(line13, m.Location.Column)
 		}
 	}
-	if len(line12) != 2 {
-		t.Fatalf("line 12 matches = %v, want 2 (add_ints and mul_ints)", line12)
+	if len(line13) != 2 {
+		t.Fatalf("line 13 matches = %v, want 2 (add_ints and mul_ints)", line13)
 	}
-	if line12[0] == line12[1] {
-		t.Errorf("two matches at same column %d on line 12", line12[0])
+	if line13[0] == line13[1] {
+		t.Errorf("two matches at same column %d on line 13", line13[0])
 	}
 }
 

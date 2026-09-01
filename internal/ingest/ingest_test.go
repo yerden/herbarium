@@ -359,7 +359,7 @@ func TestCompilerIngestFixture(t *testing.T) {
 
 	t.Run("decl_file from DWARF", func(t *testing.T) {
 		// compute is declared in lib/shared_utils.h line 6, defined in
-		// lib/shared_utils.c line 11. DWARF fills decl_file/decl_line
+		// lib/shared_utils.c line 12. DWARF fills decl_file/decl_line
 		// on the def rows.
 		rows, err := db.Query(`
 			SELECT sd.decl_file, sd.decl_line
@@ -383,6 +383,36 @@ func TestCompilerIngestFixture(t *testing.T) {
 		}
 		if declFile != "lib/shared_utils.h" || declLine != 6 {
 			t.Errorf("compute decl = %s:%d, want lib/shared_utils.h:6", declFile, declLine)
+		}
+	})
+
+	t.Run("def location for functions with no .ci node", func(t *testing.T) {
+		// GCC emits a callgraph-info node only for a function that reached
+		// the assembler, so one inlined at every call site leaves the
+		// Compiler pass with nothing but the TU fallback at line 0. DWARF's
+		// abstract instance root repairs it. hdr_clamp is the case that
+		// matters: its body is written in a header, so without this repair
+		// no row in the database would ever name lib/hdr_inline.h and a
+		// "what is defined in this header" query comes back empty.
+		for _, tc := range []struct {
+			name, file string
+			line       int
+		}{
+			{"hdr_clamp", "lib/hdr_inline.h", 11},
+			{"scale_by_two", "lib/shared_utils.c", 23},
+		} {
+			var file string
+			var line int
+			if err := db.QueryRow(`
+				SELECT sd.file, sd.line
+				FROM symbol_definitions sd
+				JOIN symbols s ON s.id = sd.symbol_id
+				WHERE s.name = ?`, tc.name).Scan(&file, &line); err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			if file != tc.file || line != tc.line {
+				t.Errorf("%s def = %s:%d, want %s:%d", tc.name, file, line, tc.file, tc.line)
+			}
 		}
 	})
 

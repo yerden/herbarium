@@ -42,6 +42,7 @@ func TestSourcesAgainstFixture(t *testing.T) {
 		"app2/main.c",
 		"include/dispatch.h",
 		"lib/dispatch_impls.c",
+		"lib/hdr_inline.h",
 		"lib/icf_pair.c",
 		"lib/shared_utils.c",
 		"lib/shared_utils.h",

@@ -89,9 +89,17 @@ CREATE VIRTUAL TABLE symbols_fts USING fts5(
 CREATE TABLE symbol_definitions (
   id           INTEGER PRIMARY KEY,
   symbol_id    INTEGER REFERENCES symbols(id),
+  -- file/line come from GCC's callgraph-info (.ci) node for the function,
+  -- NOT from DWARF. A function GCC inlined at every call site gets no .ci
+  -- node, so its location is recovered from DWARF's abstract instance root
+  -- instead — which is how a static inline whose body is written in a
+  -- header ends up with a .h in `file`. Both routes give the location the
+  -- body was written at, so a header inline is findable by `file`.
   file         TEXT,            -- def file, project-relative
   line         INTEGER,         -- def line
-  decl_file    TEXT,            -- from DWARF; '' if same as file
+  -- decl_file is the separate prototype's location, from DWARF's
+  -- DW_AT_declaration entries; '' when there is none or it matches file.
+  decl_file    TEXT,
   decl_line    INTEGER,         -- 0 if same as line
   is_weak      INTEGER,         -- 0/1 — this specific def is weak
   linkage_name TEXT             -- link-time name of this def (mostly = symbol name;

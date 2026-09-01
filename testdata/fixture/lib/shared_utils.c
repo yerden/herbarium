@@ -1,4 +1,5 @@
 #include "shared_utils.h"
+#include "hdr_inline.h"
 
 int add_ints(int a, int b) {
     return a + b;
@@ -24,5 +25,5 @@ static inline __attribute__((always_inline)) int scale_by_two(int v) {
 }
 
 int scaled_compute(int a, int b) {
-    return scale_by_two(compute(a, b));
+    return hdr_clamp(scale_by_two(compute(a, b))) + hdr_clamp(a);
 }

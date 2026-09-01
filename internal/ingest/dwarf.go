@@ -18,6 +18,9 @@ import (
 //   - symbols.signature   ← reconstructed from DW_TAG_subprogram + params
 //   - symbol_definitions.decl_file / decl_line ← from DWARF's decl_file
 //     attribute on the declaration entries (typically the header)
+//   - symbol_definitions.file / line ← repaired for functions GCC
+//     inlined everywhere, which get no .ci node and so reached this
+//     pass carrying the Compiler pass's TU fallback (see defLocStmt)
 //   - indirect_call_sites ← DW_TAG_call_site without DW_AT_call_origin,
 //     with file/line/column resolved via the CU's line table, plus the
 //     callee_type/field_hint dwarfingest recovered for the site
@@ -48,6 +51,22 @@ func DWARF(db *sql.DB, bd *builddir.BuildDir, pr *PathResolver, idByUSR map[stri
 		return DwarfSummary{}, fmt.Errorf("ingest/dwarf: prepare decl update: %w", err)
 	}
 	defer declStmt.Close()
+
+	// A function GCC inlined at every call site gets no node in the .ci
+	// dump — callgraph-info only describes functions that reached the
+	// assembler — so the Compiler pass had nothing to anchor its def row
+	// to and fell back to the TU path with line 0. DWARF's abstract
+	// instance root is the only place the real location survives, and for
+	// a static inline written in a header that location is the header,
+	// not the TU. line = 0 is exactly the set of rows the fallback
+	// produced; a .ci-anchored row is already authoritative.
+	defLocStmt, err := tx.Prepare(`
+		UPDATE symbol_definitions SET file = ?, line = ?
+		WHERE symbol_id = ? AND line = 0`)
+	if err != nil {
+		return DwarfSummary{}, fmt.Errorf("ingest/dwarf: prepare def location update: %w", err)
+	}
+	defer defLocStmt.Close()
 
 	indirectStmt, err := tx.Prepare(`
 		INSERT INTO indirect_call_sites
@@ -95,6 +114,16 @@ func DWARF(db *sql.DB, bd *builddir.BuildDir, pr *PathResolver, idByUSR map[stri
 					return DwarfSummary{}, fmt.Errorf("ingest/dwarf: signature %s: %w", sp.Name, err)
 				}
 				sum.Signatures++
+			}
+			if sp.AbstractInline && sp.DeclFile != "" && sp.DeclLine > 0 {
+				defRel := pr.ToProjectRelative(sp.DeclFile).Rel
+				res, err := defLocStmt.Exec(defRel, sp.DeclLine, symID)
+				if err != nil {
+					return DwarfSummary{}, fmt.Errorf("ingest/dwarf: def location update %s: %w", sp.Name, err)
+				}
+				if n, _ := res.RowsAffected(); n > 0 {
+					sum.DefLocations += int(n)
+				}
 			}
 			// Declaration entries carry decl_file/decl_line pointing
 			// at the header where the prototype lives — different from
@@ -179,6 +208,7 @@ func DWARF(db *sql.DB, bd *builddir.BuildDir, pr *PathResolver, idByUSR map[stri
 type DwarfSummary struct {
 	Signatures      int
 	DeclLocations   int
+	DefLocations    int
 	IndirectSites   int
 	InlineInstances int
 }

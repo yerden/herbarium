@@ -236,10 +236,12 @@ CREATE VIRTUAL TABLE symbols_fts USING fts5(
 CREATE TABLE symbol_definitions (
   id INTEGER PRIMARY KEY,
   symbol_id INTEGER REFERENCES symbols(id),
-  file TEXT,               -- def file, project-relative
-  line INTEGER,
-  decl_file TEXT,          -- from DWARF; '' if same as file
-  decl_line INTEGER,       -- 0 if same as line
+  file TEXT,               -- def file, project-relative; from the .ci node,
+  line INTEGER,            -- or from DWARF's abstract instance root when GCC
+                           -- inlined the function everywhere and emitted no
+                           -- .ci node (a header static inline lands here)
+  decl_file TEXT,          -- separate prototype's location, from DWARF's
+  decl_line INTEGER,       -- DW_AT_declaration entries; '' / 0 if none
   is_weak INTEGER,         -- 0/1 — this specific def has weak linkage
   linkage_name TEXT        -- link-time name of this def (mostly = symbols.name;
                            -- differs for GCC clones like 'foo.constprop.0')
@@ -504,6 +506,7 @@ The verdict is decided from the full row set even when the echoed evidence is ca
 ### Phase 3 — DWARF ingest (~3 days)
 
 - `internal/dwarfingest/` — read DWARF from each `.o` via `debug/elf` + `debug/dwarf`. Extracts subprograms with signatures (walking DW_AT_type refs for return + params), struct/typedef/variable DIEs, `DW_TAG_call_site` entries with source-caller attribution via the inlined-subroutine chain, and `DW_TAG_inlined_subroutine` entries as inline instances in their own right (callee via `DW_AT_abstract_origin`, caller and nesting depth from the DIE stack, call site from `DW_AT_call_file/line/column`).
+- Repair `symbol_definitions.file/line` for functions GCC inlined at every call site: callgraph-info describes only functions that reached the assembler, so Phase 2 fell back to the including TU with line 0. DWARF's abstract instance root (`DW_AT_inline`, no `DW_AT_low_pc`) carries the real location, which for a static inline written in a header is the header.
 - Populate `symbols.signature` and `symbol_definitions.decl_file/decl_line` (UPSERT — Phase 2 already inserted the identity row; Phase 3 enriches). Owns `indirect_call_sites` insertion with `file`/`line`/`column` resolved via `LineReader.SeekPC(call_return_pc-1)` — GCC 16 puts `DW_AT_call_file/line/column` on the enclosing `DW_TAG_inlined_subroutine`, not on the `DW_TAG_call_site`. Also owns `inline_instances`: the same `DW_TAG_inlined_subroutine` DIEs, read as facts rather than as traversal, which is the only plane that sees the early inliner's work.
 - Struct field DIEs are parsed (name + rendered type per member) but not persisted — the plan schema has no fields table currently. Add one when a downstream tool needs to query by struct field.
 - Typedef DIEs are captured with their target type as a rendered string; no full canonicalization to underlying base types (a `size_t` stays `size_t` rather than becoming `unsigned long`).

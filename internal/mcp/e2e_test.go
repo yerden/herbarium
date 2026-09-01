@@ -224,6 +224,25 @@ func TestE2EFixtureContract(t *testing.T) {
 		}
 	}
 
+	// --- A static inline whose body lives in a header is findable by
+	//     that header, not by the TU that happened to include it ---
+	{
+		var resp herbmcp.DescribeSymbolResponse
+		call(t, client, ctx, "describe_symbol",
+			map[string]any{"usr": symbolUSR(t, client, "hdr_clamp")}, &resp)
+		if len(resp.Definitions) != 1 {
+			t.Fatalf("hdr_clamp definitions = %+v, want 1", resp.Definitions)
+		}
+		// GCC emits no .ci node for it, so this location exists only
+		// because ingest.DWARF read the abstract instance root. Before
+		// that repair the row read lib/shared_utils.c:0 and no query on
+		// the header could reach it.
+		got := resp.Definitions[0].Location
+		if got.Path != "lib/hdr_inline.h" || got.Line != 11 {
+			t.Errorf("hdr_clamp def = %s:%d, want lib/hdr_inline.h:11", got.Path, got.Line)
+		}
+	}
+
 	// --- Indirect callsites under use_dispatch ---
 	{
 		var resp herbmcp.ListIndirectCallSitesResponse

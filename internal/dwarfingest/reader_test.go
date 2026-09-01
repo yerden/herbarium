@@ -210,7 +210,7 @@ func TestReadInlineInstances(t *testing.T) {
 		line   int
 	}{
 		{"app1 main.c.o", []string{"app1", "app1.p", "main.c.o"}, "use_dispatch", "main", 14},
-		{"shared_utils.c.o", []string{"lib", "libshared.a.p", "shared_utils.c.o"}, "scale_by_two", "scaled_compute", 27},
+		{"shared_utils.c.o", []string{"lib", "libshared.a.p", "shared_utils.c.o"}, "scale_by_two", "scaled_compute", 28},
 	} {
 		t.Run(tc.object, func(t *testing.T) {
 			args := append([]string{repoRoot(t), "testdata", "fixture", "builddir"}, tc.parts...)

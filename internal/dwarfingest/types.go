@@ -41,6 +41,12 @@ type Subprogram struct {
 	Definition  bool   // has DW_AT_low_pc — a real def
 	Declaration bool   // DW_AT_declaration=1 — a decl only
 	External    bool   // DW_AT_external=1
+	// AbstractInline marks the abstract instance root GCC emits for a
+	// function it inlined everywhere. Its DeclFile/DeclLine are the only
+	// record of where the body was written — for a static inline in a
+	// header, GCC emits no .ci node at all, so the compiler plane never
+	// saw that location. See ingest.DWARF.
+	AbstractInline bool
 }
 
 // CallSite is one DW_TAG_call_site DIE. GCC emits these under the
