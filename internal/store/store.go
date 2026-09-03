@@ -5,8 +5,12 @@ package store
 import (
 	"database/sql"
 	_ "embed"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
+	"os"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -112,6 +116,77 @@ func OpenReadOnly(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("store: ping ro %q: %w", path, err)
 	}
 	return db, nil
+}
+
+// DiagnosePath explains, in terms a caller can act on, why a path is not
+// a usable index. SQLite answers both "no such file" and "you may not
+// read this file" with the same `unable to open database file (14)`,
+// which sends the reader hunting for corruption when the real cause is a
+// wrong --out or a collect that ran under sudo. Returns nil when the
+// file is present and readable — whether it is a *herbarium* index is
+// then the caller's schema check to make.
+func DiagnosePath(path string) error {
+	info, err := os.Stat(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("there is no file at %s", path)
+	case err != nil:
+		return fmt.Errorf("cannot stat %s: %w", path, err)
+	case info.IsDir():
+		return fmt.Errorf("%s is a directory, not an .hbr index", path)
+	case info.Size() == 0:
+		return fmt.Errorf("%s is empty — a collect was probably interrupted before it finished", path)
+	}
+
+	// Stat succeeds on a file the caller cannot read: it needs only
+	// execute permission on the directory. Opening is the only way to
+	// tell the two apart before handing the path to SQLite.
+	f, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrPermission) {
+			return fmt.Errorf(
+				"%s is mode %s and this process runs as uid %d, which cannot read it — "+
+					"the index was written by another user, typically a collect run under sudo. "+
+					"Re-collect as this user, or chown the file to it",
+				path, info.Mode().Perm(), os.Getuid())
+		}
+		return fmt.Errorf("cannot read %s: %w", path, err)
+	}
+	return f.Close()
+}
+
+// SealForReading takes a finished index out of WAL journalling. Collect
+// writes under WAL for throughput, but the mode lives in the file header
+// and outlives the writer: a WAL database cannot be opened even
+// read-only without a -shm beside it, so a shipped .hbr would demand
+// write access to its own directory from every reader and fail with
+// SQLITE_READONLY_DIRECTORY wherever it does not have it. Sealing also
+// unlinks the -wal/-shm sidecars, which matters for `collect --replace`
+// — a serve process reopening the path must not find sidecars left over
+// from a different inode.
+//
+// Takes a path rather than a handle because Open pins journal_mode(WAL)
+// on every connection it hands out, and because the switch needs to be
+// the only connection to the file.
+func SealForReading(path string) error {
+	db, err := sql.Open("sqlite", "file:"+url.PathEscape(path))
+	if err != nil {
+		return fmt.Errorf("store: seal %q: %w", path, err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	var mode string
+	if err := db.QueryRow(`PRAGMA journal_mode=DELETE`).Scan(&mode); err != nil {
+		return fmt.Errorf("store: seal %q: %w", path, err)
+	}
+	// SQLite reports the mode still in force rather than failing when it
+	// cannot make the switch, so the return value is the only evidence
+	// the seal took.
+	if !strings.EqualFold(mode, "delete") {
+		return fmt.Errorf("store: seal %q: journal_mode is %q after the switch, want \"delete\"", path, mode)
+	}
+	return db.Close()
 }
 
 // Init applies the embedded schema and stamps meta.schema_version. Safe

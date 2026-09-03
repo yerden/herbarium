@@ -27,7 +27,7 @@ func startClient(t *testing.T, hbrPath string) *mcpclient.Client {
 	}
 	t.Cleanup(func() { db.Close() })
 
-	srv := herbmcp.New(db, herbmcp.Options{Version: "test"})
+	srv := herbmcp.New(db, herbmcp.Options{Version: "test", IndexPath: hbrPath})
 	client, err := mcpclient.NewInProcessClient(srv.MCP())
 	if err != nil {
 		t.Fatalf("NewInProcessClient: %v", err)

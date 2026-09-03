@@ -154,9 +154,10 @@ Flags worth knowing:
 | `--target NAME[,NAME...]` | **The main lever on collect time** — see above. Restricts `nm`/`objdump`/map work to these targets. Repeatable, and each occurrence may be a comma-separated list. Compiler-plane ingest (symbols, cgraph edges, DWARF) and source packing still cover every TU, so this is a fast slice, not a partial index. An unknown name is a hard error that lists what is available. |
 | `--strict` | Refuse to pack any source whose mtime is newer than its `.o`. Use it when you need a guarantee that packed blobs match the DWARF line numbers. |
 | `--include-external GLOB` | Pack headers from outside `--project-root` (e.g. `/usr/include/**`) into `external_sources`. Repeatable; a zero-match glob is a hard error. |
+| `--replace` | Overwrite an existing `--out`. The new index is built beside it and renamed into place, so a running `serve` keeps answering until its `reload_index` tool reopens the path. Prefer this over `rm`-ing the old index: the path is never absent, so a reload can't land in the gap. |
 
-`collect` refuses to overwrite an existing `.hbr`. Incremental re-ingest is
-deferred, so every run is a full rebuild — `rm` the old artifact first (step 8).
+`collect` refuses to overwrite an existing `.hbr` unless `--replace` is passed.
+Incremental re-ingest is deferred, so every run is a full rebuild either way.
 
 A failing preflight looks like this, and no indexing proceeds:
 
@@ -174,7 +175,7 @@ herbarium preflight failed for builddir
 herbarium serve --hbr myproject.hbr --check
 ```
 
-Opens the `.hbr` read-only, registers all 29 tools, prints
+Opens the `.hbr` read-only, registers all 30 tools, prints
 `herbarium serve --check: … opens (schema N)`, and exits. This catches a schema
 mismatch between binary and artifact before opencode sees a transport that dies
 on startup.

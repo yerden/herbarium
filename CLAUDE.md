@@ -7,7 +7,7 @@ Working notes for Claude when editing this repo. Read `herbarium-plan.md` first 
 `herbarium` ingests an already-built Meson C project into a single SQLite artifact (`.hbr`) and serves it over MCP for AI agents. Every fact in the index traces back to a compiler dump (GCC's `-fcallgraph-info`, `-fdump-ipa-*`), DWARF, or a binutils inspector (`nm`, `objdump`) — never to a re-parser. Two subcommands:
 
 - `herbarium collect` — reads a builddir + project-root, writes an `.hbr`.
-- `herbarium serve` — opens an `.hbr` read-only, exposes 29 MCP tools over stdio or streamable HTTP.
+- `herbarium serve` — opens an `.hbr` read-only, exposes 30 MCP tools over stdio or streamable HTTP.
 
 ## Non-negotiables (from `herbarium-plan.md § Design principles`)
 
@@ -33,7 +33,7 @@ internal/
   linkplane/            nm + objdump + map file parsers; runTool wraps exec
   usr/                  USR synthesis per herbarium-plan.md appendix
   ingest/               pipeline orchestrator: Compiler, DWARF, Targets, Link, Sources
-  mcp/                  MCP server + 29 tools; tests build fixture .hbr in-process
+  mcp/                  MCP server + 30 tools; tests build fixture .hbr in-process
 testdata/
   fixture/              minimal Meson project the tests build against
   samples/gcc-16/       pinned parser fixtures (dump files, map files, .ninja_deps)
@@ -41,7 +41,9 @@ testdata/
 
 ## Pipeline order (`cmd/herbarium/collect.go`)
 
-Passes run sequentially, each in its own SQL transaction, so a mid-pipeline failure leaves an empty `.hbr` rather than a half-populated one:
+Passes run sequentially, each in its own SQL transaction. The index is built into a scratch file beside `--out`, sealed out of WAL (`store.SealForReading`), and `os.Rename`d into place only after the last pass, so a mid-pipeline failure leaves **no** `.hbr` rather than a half-populated one — and `--replace` never exposes a partial file to a `serve` process holding the same path (see Reloading a live session).
+
+The seal is not housekeeping. Collect writes under WAL for throughput, but `journal_mode` lives in the file header and outlives the writer, and SQLite cannot open a WAL database *even read-only* without a `-shm` beside it — so an unsealed `.hbr` demands write access to its own directory from every reader and fails with `SQLITE_READONLY_DIRECTORY` where it does not have it. Sealing also unlinks the sidecars, which is what stops a `--replace` from leaving one inode's `-wal`/`-shm` sitting at the next inode's path.
 
 1. `mesonintrospect.Load` → parse `meson-info/*.json`.
 2. `builddir.Crawl` → find `.o` files + their sidecar dumps.
@@ -53,7 +55,7 @@ Passes run sequentially, each in its own SQL transaction, so a mid-pipeline fail
 8. `ingest.Link` → `nm` + `objdump` + `.map` files → `link_resolutions` + `call_edges(objdump)` + `symbol_reachability`.
 9. `ingest.Sources` (Phase 5) → pack target sources + `.ninja_deps` headers via `blobstore`.
 
-Phase 7 (incremental re-ingest) is **deferred by user decision** — every collect rebuilds from scratch. `collect` refuses to overwrite an existing `.hbr`.
+Phase 7 (incremental re-ingest) is **deferred by user decision** — every collect rebuilds from scratch. `collect` refuses to overwrite an existing `.hbr` unless `--replace` is passed.
 
 **Scope-limiting flag:** `collect --target NAME[,NAME...]` filters `intro.Targets` to the requested set before any ingest pass runs, so `ingest.Targets` and `ingest.Link` skip work for other targets. This is the main lever on collect time, and the reason is in `ingest.Link`'s shape: it loops over linked binaries (static libraries are skipped — no binary to inspect) and runs `linkplane.RunObjdump` over each one *in full*. Cost therefore scales with binaries × their whole size, not with how much distinct code exists, so N executables statically linking one library disassemble that library's code N times. `RunObjdump` streams rather than buffers precisely because a single binary's disassembly can exceed 100 MB.
 
@@ -61,7 +63,7 @@ This is a *fast slice*, not a partial index: compiler-plane ingest processes eve
 
 ## MCP tools (Phase 6, landed)
 
-29 tools grouped by file under `internal/mcp/`. Every location-returning tool wraps its position in a uniform `Location{path, line?, column?, blob_hash, snippet?, absolute_path?}` shape (see `location.go`). Response payloads land as both `text` (JSON pretty-printed) and `StructuredContent` on the `CallToolResult` — an agent can consume either. Tool descriptions are the user-facing contract; edit them if behavior changes.
+30 tools grouped by file under `internal/mcp/`. Every location-returning tool wraps its position in a uniform `Location{path, line?, column?, blob_hash, snippet?, absolute_path?}` shape (see `location.go`). Response payloads land as both `text` (JSON pretty-printed) and `StructuredContent` on the `CallToolResult` — an agent can consume either. Tool descriptions are the user-facing contract; edit them if behavior changes.
 
 Groups:
 
@@ -77,6 +79,24 @@ Groups:
 **Response-size contract.** Every tool whose result set scales with the project — `describe_inlining`, `list_inline_instances`, `explain_call`, `list_indirect_call_sites`, `list_unreachable_symbols`, `list_entry_points`, `search_source` — takes `limit` (`rowLimit`, max 2000) and reports `truncated`, and every location-returning one takes `include_snippets` (`wantSnippets`, default **off**). Declare both with `limitArg(default)` / `snippetArg()` from `location.go` so the wording stays identical. The inlining tools additionally answer summary-first: `summary` (exact totals, by pass, by inline depth) is computed over every matching row, the row arrays are capped at 50 (`limit`, max 1000) with a `truncated` flag, and snippets are off unless `include_snippets=true`. This is not tidiness — a row costs ~500 bytes without a snippet and ~700 with one, three arrays ship in one response, and an aggressively inlined caller produced enough rows to exceed an MCP client's output limit and have the *whole* payload truncated by the harness, which is worse than any cap. `explain_call` is the exception that proves the rule: its verdict is always decided from the full row set (`verdictScanLimit`) and only the echoed evidence is capped, because a verdict computed from truncated rows could be flatly wrong.
 - **Indirect:** `list_indirect_call_sites`, `list_address_taken_functions`, `resolve_indirect_call`, `list_devirt_hints`.
 - **Linkage + reachability:** `describe_link_resolution`, `list_weak_symbols`, `list_undefined_symbols`, `list_icf_groups`, `list_unreachable_symbols`, `list_entry_points`.
+- **Session:** `reload_index` (see below).
+
+## Reloading a live session
+
+An agent that edits C code mid-session needs the index rebuilt, and on the stdio transport it cannot restart its own MCP server — the client owns the process lifetime. So the loop is: the agent runs `ninja`, then `herbarium collect … --out <the served .hbr> --replace`, then calls `reload_index`.
+
+The split is forced by the design principles, not by taste. Serve cannot re-ingest (`ingest.Link` shells out to `nm`/`objdump`, and serve has zero subprocess deps) and herbarium never runs the build itself, so re-ingest stays a separate process and the only serve-side capability is swapping the handle.
+
+Two pieces make that swap safe, and both are load-bearing:
+
+- **`collect --replace` builds elsewhere, seals, and renames.** `os.Rename` is atomic within a filesystem (hence the scratch file in `--out`'s own directory), and a reader holding the old path keeps its inode until it reopens — so the live server answers from the old index right up to the reload, and never sees a half-written file. The `db.Close()` before the rename is required, not tidiness: the `-wal`/`-shm` sidecars are only folded back in when the last connection drops.
+- **`Server.mu` guards `s.db`, and `pinIndex` holds it read-locked for the whole of every tool call.** That is why the 61 direct `s.db` reads across the tool files need no locking of their own — and why any future code path touching `s.db` from outside a tool handler must take `RLock` itself. `reload_index` is exempt from the middleware by name: it takes the write lock, `sync.RWMutex` is not reentrant, and routing it through `pinIndex` would deadlock the session it exists to keep alive.
+
+Every failure path in `Reload` (missing file, not an index, `schema_version` mismatch after a herbarium upgrade) closes the new handle and leaves the old one serving. A reload that cannot produce a usable index is a no-op, never an outage. `changed=false` in the response means the file on disk still carries the `indexed_at` the server already had — almost always a re-collect that didn't happen, or wrote somewhere else.
+
+`store.DiagnosePath` runs before every read-only open — `Reload`'s and `serve`'s at startup — because SQLite collapses distinct causes into one errno. **`unable to open database file (14)` means either "no such file" or "you may not read this file"**, and both have bitten real sessions: a re-collect that wrote elsewhere, and a `collect` run under `sudo` leaving a root-owned 0600 artifact that the serve process cannot open. Stat alone cannot tell them apart (stat succeeds on an unreadable file — it needs only directory execute permission), so the diagnosis opens the file too. On the serve path this matters more than it looks: a failed startup takes the MCP transport with it and clients report only `-32000: Connection closed`, so that one stderr line is all the evidence anyone gets.
+
+The reload flavour appends the `collect … --replace` line for the exact served path, which is also why the tool description tells agents to read the path out of `reload_index`'s own `path` field rather than guess at `--out`.
 
 ## Known gaps
 

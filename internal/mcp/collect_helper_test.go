@@ -41,7 +41,7 @@ func collectForTest(bdir, proot, out string) int {
 		{"herbarium_version", "test"},
 		{"gcc_version", intro.CCompiler.Version},
 		{"meson_version", intro.MesonVersion},
-		{"indexed_at", time.Now().UTC().Format(time.RFC3339)},
+		{"indexed_at", time.Now().UTC().Format(time.RFC3339Nano)},
 		{"project_root_hint", proot},
 	}
 	for _, kv := range stamps {
@@ -104,7 +104,7 @@ func collectForTestWithGlobs(bdir, proot, out string, globs []string) error {
 		{"herbarium_version", "test"},
 		{"gcc_version", intro.CCompiler.Version},
 		{"meson_version", intro.MesonVersion},
-		{"indexed_at", time.Now().UTC().Format(time.RFC3339)},
+		{"indexed_at", time.Now().UTC().Format(time.RFC3339Nano)},
 		{"project_root_hint", proot},
 	}
 	for _, kv := range stamps {

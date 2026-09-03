@@ -1,7 +1,9 @@
 // Package mcp exposes an .hbr index over MCP (see herbarium-plan.md
-// § MCP tools for the full tool contract). The server is stateless
+// § MCP tools for the full tool contract). The server holds no state
 // beyond its read-only DB handle, so it is safe to run the same server
-// value across stdio and streamable-HTTP transports concurrently.
+// value across stdio and streamable-HTTP transports concurrently. That
+// handle is swappable — see reload_tool.go — so an agent that rebuilds
+// and re-collects mid-session does not have to drop the connection.
 //
 // Tool groups live in sibling files:
 //
@@ -22,10 +24,13 @@
 //   linkage_tools.go           describe_link_resolution, list_weak_symbols,
 //                              list_undefined_symbols, list_icf_groups,
 //                              list_unreachable_symbols, list_entry_points
+//   reload_tool.go             reload_index
 package mcp
 
 import (
+	"context"
 	"database/sql"
+	"sync"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpsrv "github.com/mark3labs/mcp-go/server"
@@ -45,14 +50,29 @@ type Options struct {
 	// checkout access" — the intended shipping shape for shared .hbr
 	// artifacts.
 	ProjectRoot string
+	// IndexPath is the .hbr the DB handle was opened from. Required for
+	// reload_index — without it the tool refuses rather than guessing,
+	// since a SQLite handle does not reliably report its own filename.
+	IndexPath string
 }
 
 // Server holds the mcp-go server and the read-only DB handle every
 // tool needs. Constructed once per serve invocation.
 type Server struct {
-	db  *sql.DB
+	// mu guards db. Every tool handler runs under RLock (see pinIndex),
+	// so handlers may read s.db directly; reload_index takes the write
+	// lock to swap it. Any future code path that touches s.db from
+	// outside a tool handler must take RLock itself.
+	mu sync.RWMutex
+	db *sql.DB
+
+	// reloadMu single-flights Reload so two concurrent reload_index
+	// calls cannot both open a handle and race to install it — the
+	// loser's handle would be leaked, still holding a file descriptor.
+	reloadMu sync.Mutex
+
 	opts Options
-	mcp *mcpsrv.MCPServer
+	mcp  *mcpsrv.MCPServer
 }
 
 // New builds a Server, registers every tool, and returns it ready to
@@ -64,6 +84,7 @@ func New(db *sql.DB, opts Options) *Server {
 	if version == "" {
 		version = "dev"
 	}
+	s := &Server{db: db, opts: opts}
 	m := mcpsrv.NewMCPServer(
 		ServerName, version,
 		mcpsrv.WithToolCapabilities(false),
@@ -76,8 +97,9 @@ func New(db *sql.DB, opts Options) *Server {
 		mcpsrv.WithPromptCapabilities(false),
 		mcpsrv.WithResourceCapabilities(false, false),
 		mcpsrv.WithRecovery(),
+		mcpsrv.WithToolHandlerMiddleware(s.pinIndex),
 	)
-	s := &Server{db: db, opts: opts, mcp: m}
+	s.mcp = m
 	s.registerSchemaTool()
 	s.registerSQLTool()
 	s.registerSourceTools()
@@ -87,7 +109,24 @@ func New(db *sql.DB, opts Options) *Server {
 	s.registerCallGraphRuntimeTools()
 	s.registerIndirectTools()
 	s.registerLinkageTools()
+	s.registerReloadTool()
 	return s
+}
+
+// pinIndex holds the index read lock for the whole of every tool call,
+// so a reload cannot close the *sql.DB a query is running against. The
+// reload tool is exempt because it takes the write lock and
+// sync.RWMutex is not reentrant — routing it through here would
+// deadlock the session it exists to keep alive.
+func (s *Server) pinIndex(next mcpsrv.ToolHandlerFunc) mcpsrv.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if req.Params.Name == reloadToolName {
+			return next(ctx, req)
+		}
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		return next(ctx, req)
+	}
 }
 
 // MCP returns the underlying mcp-go server, so callers can attach it to

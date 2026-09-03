@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -18,10 +19,14 @@ import (
 func runCollect(args []string) int {
 	fs := flag.NewFlagSet("collect", flag.ContinueOnError)
 	var (
-		bdir   = fs.String("builddir", "", "Meson build directory (required)")
-		proot  = fs.String("project-root", "", "project source root (required)")
-		out    = fs.String("out", "herbarium.hbr", "output .hbr file")
-		strict = fs.Bool("strict", false, "refuse to pack sources whose mtime is newer than their .o (per herbarium-plan.md Risks)")
+		bdir    = fs.String("builddir", "", "Meson build directory (required)")
+		proot   = fs.String("project-root", "", "project source root (required)")
+		out     = fs.String("out", "herbarium.hbr", "output .hbr file")
+		strict  = fs.Bool("strict", false, "refuse to pack sources whose mtime is newer than their .o (per herbarium-plan.md Risks)")
+		replace = fs.Bool("replace", false,
+			"overwrite an existing --out. The new index is built beside it and renamed into place, "+
+				"so a `herbarium serve` already holding the old file keeps answering from it until "+
+				"its reload_index tool reopens the path.")
 	)
 	var targets stringSliceFlag
 	fs.Var(&targets, "target",
@@ -77,13 +82,27 @@ func runCollect(args []string) int {
 
 	// Refuse to clobber an existing .hbr silently — the plan treats each
 	// index run as producing a fresh artifact (incremental re-ingest is
-	// Phase 7 and uses a distinct code path).
-	if _, err := os.Stat(*out); err == nil {
-		fmt.Fprintf(os.Stderr, "collect: %s already exists; remove it or pass --out to a new path\n", *out)
+	// Phase 7 and uses a distinct code path). --replace is the opt-in for
+	// the agent loop, where re-collecting over the served path is the
+	// point.
+	if _, err := os.Stat(*out); err == nil && !*replace {
+		fmt.Fprintf(os.Stderr, "collect: %s already exists; pass --replace to overwrite it, remove it, or pass --out to a new path\n", *out)
 		return 1
 	}
 
-	db, err := store.Open(*out)
+	// Build beside the destination and rename in at the end. Two
+	// properties come out of that: a failed collect leaves no .hbr at all
+	// rather than a stub, and --replace never exposes a half-written file
+	// to a serve process — rename is atomic, and a reader holding the old
+	// path keeps its inode until it reopens.
+	tmpPath, err := reserveTempIndex(*out)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer removeIndexFiles(tmpPath)
+
+	db, err := store.Open(tmpPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -100,7 +119,10 @@ func runCollect(args []string) int {
 		{"herbarium_version", Version},
 		{"gcc_version", intro.CCompiler.Version},
 		{"meson_version", intro.MesonVersion},
-		{"indexed_at", time.Now().UTC().Format(time.RFC3339)},
+		// Sub-second precision so reload_index can tell "the agent
+		// re-collected" from "the agent forgot to": two collects of a
+		// small project can land in the same wall-clock second.
+		{"indexed_at", time.Now().UTC().Format(time.RFC3339Nano)},
 		{"project_root_hint", *proot},
 	}
 	for _, kv := range stamps {
@@ -148,6 +170,24 @@ func runCollect(args []string) int {
 		return 1
 	}
 
+	// Close before the rename: the -wal/-shm sidecars are only folded
+	// into the main file and unlinked when the last connection drops, so
+	// renaming a still-open database would move an incomplete artifact.
+	if err := db.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, "collect: closing index:", err)
+		return 1
+	}
+	// A shipped .hbr is read-only in the truest sense: sealing it out of
+	// WAL is what lets serve open it from a directory it cannot write.
+	if err := store.SealForReading(tmpPath); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if err := os.Rename(tmpPath, *out); err != nil {
+		fmt.Fprintln(os.Stderr, "collect:", err)
+		return 1
+	}
+
 	fmt.Printf("herbarium collect: %s written\n", *out)
 	fmt.Printf("  builddir:            %s\n", bd.Root)
 	fmt.Printf("  targets:             %d\n", len(intro.Targets))
@@ -176,6 +216,35 @@ func runCollect(args []string) int {
 		fmt.Printf("  external headers:    %d (%d new blobs)\n", srcSum.ExternalFiles, srcSum.ExternalBlobs)
 	}
 	return 0
+}
+
+// reserveTempIndex creates the scratch file collect builds into. It
+// lives in the destination's directory so the closing rename stays
+// within one filesystem — os.Rename is only atomic there, and atomicity
+// is the whole point of the detour.
+func reserveTempIndex(out string) (string, error) {
+	dir := filepath.Dir(out)
+	f, err := os.CreateTemp(dir, "."+filepath.Base(out)+".tmp-*")
+	if err != nil {
+		return "", fmt.Errorf("collect: creating scratch index in %s: %w", dir, err)
+	}
+	name := f.Name()
+	// SQLite wants to open the path itself; a zero-length file is a valid
+	// empty database, so handing over the name is enough.
+	if err := f.Close(); err != nil {
+		os.Remove(name)
+		return "", fmt.Errorf("collect: %w", err)
+	}
+	return name, nil
+}
+
+// removeIndexFiles cleans up a scratch index and its journal sidecars.
+// All three are expected to be gone on the success path (renamed away,
+// and the sidecars unlinked by the final Close), so errors are ignored.
+func removeIndexFiles(path string) {
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		os.Remove(path + suffix)
+	}
 }
 
 // stringSliceFlag lets flag.Var collect multiple --include-external

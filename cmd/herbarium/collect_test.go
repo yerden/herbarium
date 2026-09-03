@@ -2,8 +2,10 @@ package main
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -182,6 +184,63 @@ func TestCollectRefusesExistingOutput(t *testing.T) {
 	}
 	if code := runCollect([]string{"--builddir", bdir, "--project-root", proot, "--out", out}); code == 0 {
 		t.Error("second runCollect returned 0, want non-zero (should refuse to clobber)")
+	}
+}
+
+// TestCollectReplaceOverwrites covers the agent loop: re-collect over
+// the .hbr a serve process is already holding. The second run must
+// succeed and leave a valid index behind, with the temp-then-rename
+// detour leaving no scratch file behind. (The -wal/-shm sidecars beside
+// it are not ours — a WAL-mode database gets them recreated by every
+// reader, including serve --check below.)
+func TestCollectReplaceOverwrites(t *testing.T) {
+	repo := repoRoot(t)
+	bdir := filepath.Join(repo, "testdata", "fixture", "builddir")
+	proot := filepath.Join(repo, "testdata", "fixture")
+	dir := t.TempDir()
+	out := filepath.Join(dir, "replace.hbr")
+
+	args := []string{"--builddir", bdir, "--project-root", proot, "--out", out}
+	if code := runCollect(args); code != 0 {
+		t.Fatalf("first runCollect exit code = %d, want 0", code)
+	}
+	if code := runCollect(append(args, "--replace")); code != 0 {
+		t.Fatalf("runCollect --replace exit code = %d, want 0", code)
+	}
+	if code := runServe([]string{"--hbr", out, "--check"}); code != 0 {
+		t.Errorf("runServe --check after --replace exit code = %d, want 0", code)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".replace.hbr.tmp-") {
+			t.Errorf("scratch index left behind: %s", e.Name())
+		}
+	}
+}
+
+// TestCollectFailureLeavesNoIndex pins the other half of the
+// temp-then-rename contract: a collect that dies mid-pipeline must not
+// leave a stub at --out for a later --replace-less run to trip over, or
+// for a serve to open and answer from.
+func TestCollectFailureLeavesNoIndex(t *testing.T) {
+	repo := repoRoot(t)
+	proot := filepath.Join(repo, "testdata", "fixture")
+	out := filepath.Join(t.TempDir(), "doomed.hbr")
+
+	if code := runCollect([]string{
+		"--builddir", filepath.Join(repo, "testdata", "fixture", "builddir"),
+		"--project-root", proot,
+		"--out", out,
+		"--target", "no_such_target",
+	}); code == 0 {
+		t.Fatal("runCollect with an unknown target returned 0")
+	}
+	if _, err := os.Stat(out); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(%s) = %v, want IsNotExist", out, err)
 	}
 }
 

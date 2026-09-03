@@ -11,7 +11,7 @@ Every fact in the index traces back to something the compiler or linker already 
 Two subcommands, each with a narrow contract:
 
 - `herbarium collect --builddir DIR --project-root DIR --out FILE` — reads the builddir and writes a `.hbr`. Runs `nm` and `objdump` against the finished binaries; that's the extent of subprocess use. On a project with many executables this dominates collect time — every binary is disassembled in full, so N executables sharing one static library pay for that library N times. Add `--target NAME[,NAME...]` to restrict the link plane to the binaries you care about; symbols, call graph, DWARF and packed sources still cover every TU. See [`INSTALL_GUIDE.md`](INSTALL_GUIDE.md#if-the-project-has-more-than-a-couple-of-executables-use---target).
-- `herbarium serve --hbr FILE [--project-root DIR]` — opens an `.hbr` read-only and exposes 29 MCP tools. Zero external subprocess deps at serve time. Stdio by default; `--transport http` switches to streamable HTTP.
+- `herbarium serve --hbr FILE [--project-root DIR]` — opens an `.hbr` read-only and exposes 30 MCP tools. Zero external subprocess deps at serve time. Stdio by default; `--transport http` switches to streamable HTTP.
 
 The `.hbr` file is the whole artifact: schema, facts, and compressed source blobs of every file the build touched. Portable across machines.
 
@@ -70,7 +70,7 @@ herbarium serve --hbr project.hbr --project-root .
 
 ## MCP tools
 
-The 29 tools are grouped by concern. Every location-returning tool wraps its position in a uniform `{path, line, column, blob_hash, snippet, absolute_path}` shape.
+The 30 tools are grouped by concern. Every location-returning tool wraps its position in a uniform `{path, line, column, blob_hash, snippet, absolute_path}` shape.
 
 **Escape hatches** — `describe_schema`, `sql_query`.
 
@@ -87,6 +87,29 @@ The 29 tools are grouped by concern. Every location-returning tool wraps its pos
 **Indirect calls** — `list_indirect_call_sites`, `list_address_taken_functions`, `resolve_indirect_call`, `list_devirt_hints`.
 
 **Linkage and reachability** — `describe_link_resolution`, `list_weak_symbols`, `list_undefined_symbols`, `list_icf_groups`, `list_unreachable_symbols`, `list_entry_points`.
+
+**Session** — `reload_index`, for an agent that changed the code mid-session.
+
+## Refreshing the index without restarting the agent
+
+herbarium never builds or re-indexes anything on its own, so a refresh is three
+steps — but none of them costs you the MCP session:
+
+```sh
+ninja -C builddir
+herbarium collect --builddir builddir --project-root . --out project.hbr --replace
+# then, from the agent: call reload_index
+```
+
+`--replace` builds the new index beside the old one and renames it into place,
+so the running `serve` keeps answering from the old artifact until `reload_index`
+reopens the path — queries in flight finish against the index they started on.
+If the new file is missing, unreadable, or carries a `schema_version` this
+binary doesn't serve, the reload is refused and the previous index stays live.
+
+A re-collect is a full rebuild (incremental re-ingest is deferred), and its cost
+is dominated by disassembling every linked binary — so `--target` is the lever
+that makes this loop quick.
 
 Tool descriptions in [`internal/mcp/`](internal/mcp/) are the user-facing contract; they document the exact semantics of each field.
 
@@ -122,7 +145,7 @@ internal/
   linkplane/            nm + objdump + map file parsers
   usr/                  USR synthesis
   ingest/               pipeline orchestrator
-  mcp/                  MCP server + 29 tools
+  mcp/                  MCP server + 30 tools
 testdata/
   fixture/              minimal Meson project the tests build against
   samples/gcc-16/       pinned parser fixtures

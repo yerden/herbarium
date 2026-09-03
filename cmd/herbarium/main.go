@@ -14,13 +14,15 @@ var Version = "dev"
 const usage = `herbarium — a GCC-native C code index for AI agents
 
 Usage:
-  herbarium collect --builddir DIR --project-root DIR --out FILE [--strict] [--target NAME[,NAME]]...
+  herbarium collect --builddir DIR --project-root DIR --out FILE [--strict] [--replace] [--target NAME[,NAME]]...
   herbarium serve   --hbr FILE [--project-root DIR] [--transport stdio|http] [--http-addr ADDR]
   herbarium version
   herbarium help
 
 Subcommands:
-  collect    Ingest a Meson builddir into an .hbr index.
+  collect    Ingest a Meson builddir into an .hbr index. --replace overwrites
+             an existing one atomically, which is what a running serve
+             picks up via its reload_index tool.
   serve      Serve an .hbr index over MCP (stdio by default; --transport http
              switches to the streamable-HTTP transport).
 `

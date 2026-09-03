@@ -471,6 +471,26 @@ The verdict is decided from the full row set even when the echoed evidence is ca
 **`sql_query(sql)`** — read-only SQL against the index. Enforcement at the driver level via `?mode=ro`.
 *Benefit:* future-proof escape hatch. The agent can answer questions the tool designer never anticipated as long as the underlying facts are in the schema.
 
+### Reloading a live session
+
+**`reload_index()`** — reopen the served `.hbr`, picking up an index rebuilt since the session started.
+*Benefit:* an agent that edits C code mid-session can get a current index without losing its MCP connection. On the stdio transport it has no other route: the client owns the server process, so short of `reload_index` the only way to a fresh index is dropping the session.
+
+The design principles decide the shape here. Serve cannot re-ingest — link-plane ingest shells out to `nm`/`objdump`, and serve has zero subprocess dependencies — and herbarium never runs the build. So a refresh is three separate steps, of which only the third is herbarium's to do while serving:
+
+1. the agent rebuilds (`ninja -C builddir`);
+2. `herbarium collect … --out <the served .hbr> --replace` re-ingests in its own process;
+3. `reload_index` swaps the handle.
+
+The swap must be invisible to a session mid-query, which constrains both ends:
+
+- **`collect --replace` builds into a scratch file in `--out`'s directory and renames it into place** as its last act, after closing the database and sealing it out of WAL journalling. `os.Rename` is atomic within a filesystem, and a process holding the old path keeps its inode until it reopens — so the running server answers from the old index right up to the reload and can never observe a partially written one. The same detour means a failed collect leaves no `.hbr` at all rather than a stub. The seal matters twice over: `journal_mode` is recorded in the file header, and SQLite cannot open a WAL database even read-only without creating a `-shm` beside it, so an unsealed artifact demands write access to its own directory from every reader — and its sidecars would otherwise outlive the rename and sit at the next inode's path.
+- **The served `*sql.DB` is guarded by an RWMutex, read-locked for the whole of every tool call** via an mcp-go tool-handler middleware. `reload_index` takes the write lock, so the swap waits out every in-flight query and the old handle is closed only once nothing can be inside it. The reload tool is exempt from its own middleware — `sync.RWMutex` is not reentrant, so wrapping it would deadlock the session it exists to keep alive.
+
+Every failure path leaves the previous index serving: a missing or unreadable file, something that isn't a herbarium index, or a `schema_version` this binary doesn't serve (the case after a herbarium upgrade) all close the new handle and return an error. A reload that cannot produce a usable index is a no-op, never an outage. The error must diagnose, not just report: the served path is absolute, fixed at startup, and invisible to the caller, and SQLite answers both "no such file" and "not readable by this user" with the same `unable to open database file (14)` — which sends an agent looking for corruption when the cause is a re-collect that wrote elsewhere, or a collect run under `sudo` whose 0600 artifact the serve process cannot read. Every read-only open therefore runs `store.DiagnosePath` first, and reload answers with the path plus the `collect … --replace` line that produces it. The same check guards serve's startup, where a failure takes the transport down and the client reports nothing but `-32000: Connection closed`.
+
+This is not incremental re-ingest (Phase 7, deferred): step 2 is a full rebuild, and its cost is dominated by disassembling every linked binary, so `--target` is what makes the loop quick.
+
 ## Implementation phases
 
 ### Phase 0 — Validation (1–2 days, before any production code)
@@ -547,7 +567,7 @@ The verdict is decided from the full row set even when the echoed evidence is ca
 
 ### Phase 7 — Incremental re-ingest — **deferred**
 
-Skipped by user decision after Phase 6. `herbarium collect` always writes a fresh index and refuses to overwrite an existing `.hbr`; users delete + re-run for a rebuild. If reopened later, the intended shape is:
+Skipped by user decision after Phase 6. `herbarium collect` always writes a fresh index, and refuses to overwrite an existing `.hbr` unless `--replace` is passed; either way a rebuild is a full re-ingest. What a live agent session needs from a rebuild — picking up the new index without dropping the MCP connection — is covered by `--replace` plus the `reload_index` tool (see § Reloading a live session), which is a handle swap, not an incremental ingest. If Phase 7 is reopened later, the intended shape is:
 
 - `internal/incremental/` — compare `mtime` and content hash of each `.o` against the previous run's meta entry.
 - `herbarium collect --incremental` — only re-ingest TUs whose `.o` changed; preserve untouched rows.
