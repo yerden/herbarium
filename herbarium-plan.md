@@ -221,8 +221,9 @@ CREATE TABLE symbols (
                            -- source-anchored. See Appendix: GCC-generated clones.
 );
 CREATE INDEX idx_sym_name ON symbols(name);
-CREATE INDEX idx_sym_kind ON symbols(kind);
-CREATE INDEX idx_sym_addr_taken ON symbols(address_taken);
+-- Partial: address_taken is 0 for ~99% of rows and every query asks for = 1.
+-- `kind` is deliberately unindexed — too few distinct values to be selective.
+CREATE INDEX idx_sym_addr_taken ON symbols(address_taken) WHERE address_taken = 1;
 CREATE VIRTUAL TABLE symbols_fts USING fts5(
   name, signature, content='symbols', content_rowid='id',
   tokenize='unicode61 separators _'

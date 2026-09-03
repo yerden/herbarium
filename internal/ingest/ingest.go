@@ -81,6 +81,7 @@ func Compiler(db *sql.DB, bd *builddir.BuildDir, pr *PathResolver) (Summary, err
 		}
 		aggregateSymbols(tu, symbols, res, pr)
 	}
+	pruneUnreferenced(symbols, referencedUSRs(tus, resolves))
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -300,6 +301,20 @@ func insertICFGroups(tx *sql.Tx, tus []*tuData, resolves map[string]perTUResolve
 // the .icf dump's alias references and are always the original names.
 func buildNameToSymbolID(tu *tuData, res perTUResolve, idByUSR map[string]int64) map[string]int64 {
 	out := map[string]int64{}
+	for name, usr := range buildNameToUSR(tu, res) {
+		if symID, ok := idByUSR[usr]; ok {
+			out[name] = symID
+		}
+	}
+	return out
+}
+
+// buildNameToUSR is buildNameToSymbolID's first half, split out so the
+// pre-insert prune can resolve .icf names before any row id exists.
+// Multiple local IDs may share a name (clones); the lowest sorted local
+// ID wins so the choice is stable across runs.
+func buildNameToUSR(tu *tuData, res perTUResolve) map[string]string {
+	out := map[string]string{}
 	if tu.cgraph == nil {
 		return out
 	}
@@ -316,15 +331,9 @@ func buildNameToSymbolID(tu *tuData, res perTUResolve, idByUSR map[string]int64)
 		if _, seen := out[fn.Name]; seen {
 			continue
 		}
-		usr, ok := res[localID]
-		if !ok {
-			continue
+		if usr, ok := res[localID]; ok {
+			out[fn.Name] = usr
 		}
-		symID, ok := idByUSR[usr]
-		if !ok {
-			continue
-		}
-		out[fn.Name] = symID
 	}
 	return out
 }
@@ -755,4 +764,107 @@ func sortedKeys(m map[string]struct{}) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// referencedUSRs collects every USR that some other row will point at:
+// an end of a cgraph call edge, an end of an optimization-record inline
+// record, or a member of an ICF group. Resolution mirrors insertEdges,
+// insertInlineRecords and insertICFGroups exactly — those drop a row
+// whose far end does not resolve, and a row that is never written
+// confers no reference.
+func referencedUSRs(tus []*tuData, resolves map[string]perTUResolve) map[string]struct{} {
+	out := map[string]struct{}{}
+	mark := func(usrs ...string) {
+		for _, u := range usrs {
+			out[u] = struct{}{}
+		}
+	}
+
+	for _, tu := range tus {
+		res := resolves[tu.object]
+		if res == nil {
+			continue
+		}
+
+		if tu.cgraph != nil {
+			for localID, fn := range tu.cgraph.Symbols {
+				callerUSR, ok := res[localID]
+				if !ok {
+					continue
+				}
+				for _, call := range fn.Called {
+					if calleeUSR, ok := res[call.TargetLocalID]; ok {
+						mark(callerUSR, calleeUSR)
+					}
+				}
+			}
+		}
+
+		if tu.optRec != nil {
+			for _, r := range tu.optRec.InlineRecords {
+				callerUSR, ok := res[r.CallerLocalID]
+				if !ok {
+					continue
+				}
+				if calleeUSR, ok := res[r.CalleeLocalID]; ok {
+					mark(callerUSR, calleeUSR)
+				}
+			}
+		}
+
+		if tu.icf != nil {
+			nameToUSR := buildNameToUSR(tu, res)
+			for _, g := range tu.icf.Groups {
+				winner, ok := nameToUSR[g.WinnerName]
+				if !ok {
+					continue
+				}
+				var losers []string
+				for _, l := range g.LoserNames {
+					if u, ok := nameToUSR[l]; ok && u != winner {
+						losers = append(losers, u)
+					}
+				}
+				if len(losers) > 0 {
+					mark(append(losers, winner)...)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// pruneUnreferenced drops symbol records that exist only because some
+// TU's cgraph listed a declaration that TU never used — overwhelmingly
+// `static inline` helpers from widely-included headers, which GCC parses
+// and then discards ("Body removed"), leaving a node with no def, no
+// edge and no inline record.
+//
+// This is a size fix, and the size is not marginal. The USR scheme
+// anchors a static at its TU, so one such helper in a hot header becomes
+// one row per including TU: on a 165-TU project, 75,660 of 86,912
+// `symbols` rows were this, spread over just 1,015 distinct names, and
+// with their index and FTS entries they accounted for 82% of the .hbr.
+// They were also active noise — list_unreachable_symbols reports exactly
+// `symbols` minus `link_resolutions`, so every one of them showed up as
+// a dead symbol.
+//
+// Keep rule: something else in the index points here. A def row; or
+// address_taken, which is resolve_indirect_call's fallback candidate
+// pool; or non-internal linkage, since link_resolutions joins by USR and
+// only internal USRs are per-TU in the first place; or a reference from
+// the edge / inline-record / ICF planes. A header inline that *was* used
+// keeps its row in the TU that used it — hdr_clamp is "definition
+// analyzed" with a Called-by edge even where GCC inlined it at every
+// site and removed the body.
+func pruneUnreferenced(symbols map[string]*symbolRec, referenced map[string]struct{}) {
+	for u, rec := range symbols {
+		if len(rec.defs) > 0 || rec.addressTaken || rec.linkage != "internal" {
+			continue
+		}
+		if _, ok := referenced[u]; ok {
+			continue
+		}
+		delete(symbols, u)
+	}
 }

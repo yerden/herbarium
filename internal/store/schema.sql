@@ -72,9 +72,14 @@ CREATE TABLE symbols (
   address_taken INTEGER,        -- 0/1 aggregated across all TUs where defined
   linkage_names TEXT            -- JSON array of every link-time name (incl. GCC clones)
 );
-CREATE INDEX idx_sym_name       ON symbols(name);
-CREATE INDEX idx_sym_kind       ON symbols(kind);
-CREATE INDEX idx_sym_addr_taken ON symbols(address_taken);
+CREATE INDEX idx_sym_name ON symbols(name);
+-- Partial on purpose: address_taken is 0 for ~99% of symbols and every
+-- query that uses it asks for = 1 (see internal/mcp/indirect_tools.go).
+-- A full index over the column costs a page per ~400 rows to store the
+-- zeros no one selects. There is deliberately no index on `kind` — it
+-- holds a handful of distinct values, so it can never be selective
+-- enough for the planner to prefer it over a scan.
+CREATE INDEX idx_sym_addr_taken ON symbols(address_taken) WHERE address_taken = 1;
 CREATE VIRTUAL TABLE symbols_fts USING fts5(
   name, signature,
   content='symbols', content_rowid='id',
