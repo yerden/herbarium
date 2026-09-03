@@ -26,8 +26,10 @@ func runCollect(args []string) int {
 	var targets stringSliceFlag
 	fs.Var(&targets, "target",
 		"Meson target name to include; empty means all. Repeatable, and each occurrence may itself be a comma-separated list "+
-			"(e.g. --target app1 --target app2 or --target app1,app2). Skips nm/objdump/map work for other targets — "+
-			"compiler-plane ingest (symbols, cgraph edges) still covers every TU.")
+			"(e.g. --target app1 --target app2 or --target app1,app2). THE MAIN LEVER ON COLLECT TIME: every linked binary "+
+			"is disassembled in full, so N executables sharing a static library pay for that library N times. This skips "+
+			"nm/objdump/map work for other targets, while compiler-plane ingest (symbols, cgraph edges, DWARF) and source "+
+			"packing still cover every TU — a fast slice, not a partial index. Only the post-link view narrows.")
 	var externalGlobs stringSliceFlag
 	fs.Var(&externalGlobs, "include-external",
 		"Absolute-path glob pointing at headers outside --project-root to pack into external_sources. "+

@@ -10,7 +10,7 @@ Every fact in the index traces back to something the compiler or linker already 
 
 Two subcommands, each with a narrow contract:
 
-- `herbarium collect --builddir DIR --project-root DIR --out FILE` — reads the builddir and writes a `.hbr`. Runs `nm` and `objdump` against the finished binaries; that's the extent of subprocess use.
+- `herbarium collect --builddir DIR --project-root DIR --out FILE` — reads the builddir and writes a `.hbr`. Runs `nm` and `objdump` against the finished binaries; that's the extent of subprocess use. On a project with many executables this dominates collect time — every binary is disassembled in full, so N executables sharing one static library pay for that library N times. Add `--target NAME[,NAME...]` to restrict the link plane to the binaries you care about; symbols, call graph, DWARF and packed sources still cover every TU. See [`INSTALL_GUIDE.md`](INSTALL_GUIDE.md#if-the-project-has-more-than-a-couple-of-executables-use---target).
 - `herbarium serve --hbr FILE [--project-root DIR]` — opens an `.hbr` read-only and exposes 29 MCP tools. Zero external subprocess deps at serve time. Stdio by default; `--transport http` switches to streamable HTTP.
 
 The `.hbr` file is the whole artifact: schema, facts, and compressed source blobs of every file the build touched. Portable across machines.

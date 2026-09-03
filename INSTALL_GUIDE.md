@@ -101,11 +101,57 @@ correctness — the next collect just needs them again.
 mode shells out to nothing. Each invocation logs its command line, elapsed
 time, and payload size to stderr.
 
+### If the project has more than a couple of executables, use `--target`
+
+This is the step that takes the time, and the cost is concentrated in one
+place: for every linked binary, `collect` runs `objdump -d` over the *whole*
+thing. A single large binary's disassembly can run past 100 MB.
+
+The trap is that the cost does not scale with how much code you wrote — it
+scales with binaries × their full size. Ten executables that all statically
+link the same library mean ten full disassemblies of that library's code,
+once per binary. A project with twenty test executables can spend minutes
+here re-reading the same functions over and over.
+
+`--target` cuts that to the binaries you actually care about:
+
+```bash
+herbarium collect \
+  --builddir builddir \
+  --project-root . \
+  --target myapp \
+  --out myproject.hbr
+```
+
+**You lose less than you would expect.** The filter applies only to the link
+plane — `nm`, `objdump`, and map files. Everything the compiler plane
+produces still covers every translation unit under the builddir, because
+that pass crawls `.o` files rather than targets:
+
+| Still complete | Narrowed to the selected targets |
+|---|---|
+| `symbols`, `symbol_definitions`, signatures | `targets` rows |
+| `call_edges` (source-view, from `.cgraph`) | `call_edges` (runtime-view, from `objdump`) |
+| Inlining: records, decisions, DWARF instances | `link_resolutions`, `symbol_reachability` |
+| Indirect call sites, devirt hints, ICF groups | |
+| Packed sources and headers — **all of them**, including files belonging to targets you excluded | |
+
+So `find_symbol`, `describe_symbol`, `list_callers`/`list_callees`,
+`read_source` and `search_source` behave identically. What narrows is the
+post-link view: `list_linked_callers`/`list_linked_callees`,
+`describe_link_resolution`, `list_unreachable_symbols`, `list_entry_points`,
+and the `list_callees` − `list_linked_callees` inlining diff answer only for
+targets you kept.
+
+Start narrow and re-collect wider if you find you need another binary's link
+view — a re-collect is a full rebuild anyway (incremental re-ingest is
+deferred), so nothing is lost by slicing first.
+
 Flags worth knowing:
 
 | Flag | Effect |
 |---|---|
-| `--target NAME[,NAME...]` | Restrict `nm`/`objdump`/map work to these targets. Repeatable. Compiler-plane ingest (symbols, cgraph edges, DWARF) still covers every TU, so this is a fast slice, not a partial index. An unknown name is a hard error that lists what is available. |
+| `--target NAME[,NAME...]` | **The main lever on collect time** — see above. Restricts `nm`/`objdump`/map work to these targets. Repeatable, and each occurrence may be a comma-separated list. Compiler-plane ingest (symbols, cgraph edges, DWARF) and source packing still cover every TU, so this is a fast slice, not a partial index. An unknown name is a hard error that lists what is available. |
 | `--strict` | Refuse to pack any source whose mtime is newer than its `.o`. Use it when you need a guarantee that packed blobs match the DWARF line numbers. |
 | `--include-external GLOB` | Pack headers from outside `--project-root` (e.g. `/usr/include/**`) into `external_sources`. Repeatable; a zero-match glob is a hard error. |
 
