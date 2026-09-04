@@ -249,3 +249,55 @@ func repoRoot(t *testing.T) string {
 	_, thisFile, _, _ := runtime.Caller(0)
 	return filepath.Join(filepath.Dir(thisFile), "..", "..")
 }
+
+// TestReserveTempIndexRespectsUmask guards the mode the finished .hbr
+// inherits. collect builds into a scratch file and renames it into
+// place, and rename carries the scratch file's mode along, so whatever
+// reserveTempIndex creates is what the user ends up with. os.CreateTemp
+// hardcodes 0600 and bypasses umask entirely, which silently made every
+// index private to the collecting user and turned a sudo collect into
+// an unopenable artifact.
+//
+// The expectation is derived rather than hardcoded: a reference file
+// created with the same 0666 request in the same directory picks up the
+// ambient umask, whatever the test runner's happens to be. Reading the
+// umask directly would mean syscall.Umask(0) plus a restore, which is
+// process-global and races every other test in the binary.
+func TestReserveTempIndexRespectsUmask(t *testing.T) {
+	dir := t.TempDir()
+
+	refPath := filepath.Join(dir, "reference")
+	ref, err := os.OpenFile(refPath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666)
+	if err != nil {
+		t.Fatalf("reference OpenFile: %v", err)
+	}
+	ref.Close()
+	refInfo, err := os.Stat(refPath)
+	if err != nil {
+		t.Fatalf("stat reference: %v", err)
+	}
+
+	got, err := reserveTempIndex(filepath.Join(dir, "out.hbr"))
+	if err != nil {
+		t.Fatalf("reserveTempIndex: %v", err)
+	}
+	defer os.Remove(got)
+
+	gotInfo, err := os.Stat(got)
+	if err != nil {
+		t.Fatalf("stat scratch: %v", err)
+	}
+	if gotInfo.Mode().Perm() != refInfo.Mode().Perm() {
+		t.Errorf("scratch index mode = %04o, want %04o (0666 masked by umask)",
+			gotInfo.Mode().Perm(), refInfo.Mode().Perm())
+	}
+	if gotInfo.Mode().Perm() == 0o600 && refInfo.Mode().Perm() != 0o600 {
+		t.Error("scratch index is 0600 — os.CreateTemp's hardcoded mode is back")
+	}
+
+	// The scratch file must land beside --out so the closing rename stays
+	// on one filesystem; a rename across devices is not atomic.
+	if filepath.Dir(got) != dir {
+		t.Errorf("scratch index in %s, want %s", filepath.Dir(got), dir)
+	}
+}

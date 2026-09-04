@@ -1,11 +1,15 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -222,20 +226,45 @@ func runCollect(args []string) int {
 // lives in the destination's directory so the closing rename stays
 // within one filesystem — os.Rename is only atomic there, and atomicity
 // is the whole point of the detour.
+//
+// This open-and-retry loop is os.CreateTemp's, inlined for one reason:
+// CreateTemp hardcodes 0600, and os.Rename carries the scratch file's
+// mode through to the finished .hbr. Every index therefore came out
+// readable only by the user who collected it — not a decision anyone
+// made, just the rename detour leaking its temp-file convention, and
+// the 0600 half of the sudo-collect failure described in CLAUDE.md
+// under Reloading a live session. Mode has to reach open(2) for the
+// kernel to apply the caller's umask (chmod would not consult it, and
+// 0666 via chmod would be world-writable), so 0666 is passed here and
+// masked down to the same 0644 SQLite produced before this detour
+// existed.
 func reserveTempIndex(out string) (string, error) {
 	dir := filepath.Dir(out)
-	f, err := os.CreateTemp(dir, "."+filepath.Base(out)+".tmp-*")
-	if err != nil {
-		return "", fmt.Errorf("collect: creating scratch index in %s: %w", dir, err)
+	prefix := filepath.Join(dir, "."+filepath.Base(out)+".tmp-")
+
+	for attempt := 0; ; attempt++ {
+		name := prefix + strconv.FormatUint(rand.Uint64(), 36)
+		f, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666)
+		if errors.Is(err, fs.ErrExist) {
+			// Same bound os.CreateTemp uses: past this many collisions the
+			// cause is a wedged directory, not bad luck, and looping is worse
+			// than reporting it.
+			if attempt < 10000 {
+				continue
+			}
+			return "", fmt.Errorf("collect: creating scratch index in %s: %w", dir, fs.ErrExist)
+		}
+		if err != nil {
+			return "", fmt.Errorf("collect: creating scratch index in %s: %w", dir, err)
+		}
+		// SQLite wants to open the path itself; a zero-length file is a valid
+		// empty database, so handing over the name is enough.
+		if err := f.Close(); err != nil {
+			os.Remove(name)
+			return "", fmt.Errorf("collect: %w", err)
+		}
+		return name, nil
 	}
-	name := f.Name()
-	// SQLite wants to open the path itself; a zero-length file is a valid
-	// empty database, so handing over the name is enough.
-	if err := f.Close(); err != nil {
-		os.Remove(name)
-		return "", fmt.Errorf("collect: %w", err)
-	}
-	return name, nil
 }
 
 // removeIndexFiles cleans up a scratch index and its journal sidecars.
