@@ -18,6 +18,19 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+// targetSourcesArg declares the `target` filter the source tools share.
+// The wording is centralised because the plane it filters on is the part
+// agents misread: target_sources holds the TUs meson compiles *into* this
+// target, so an archive the target links contributes nothing here — its
+// sources belong to the library target.
+func targetSourcesArg(extra string) mcp.ToolOption {
+	d := "Restrict to files meson compiles into this target (target_sources join) — this target's own TUs only. Sources of a static library on its link line are attributed to the library target, not to this one, so an executable linking a lib/ archive lists only its app/ files here, and a symbol defined in that archive will not be found under this filter. describe_target names the archives pulled in — re-run the filter against those target names, or drop it to cover the whole index."
+	if extra != "" {
+		d += " " + extra
+	}
+	return mcp.WithString("target", mcp.Description(d))
+}
+
 // registerSourceTools wires the four source-reference tools listed in
 // herbarium-plan.md § Source reference. list_source_drift and the
 // bare-form verify_source live-hash comparison require the server to
@@ -52,8 +65,7 @@ func (s *Server) registerSourceTools() {
 				"membership. External headers packed via --include-external are excluded "+
 				"by default; set include_external=true to union them in.",
 		),
-		mcp.WithString("target",
-			mcp.Description("Restrict to files listed as sources of this target (target_sources join). Excludes external headers.")),
+		targetSourcesArg("Excludes external headers."),
 		mcp.WithString("path_prefix",
 			mcp.Description("Restrict to files whose path starts with this prefix. Applied to both project and external paths.")),
 		mcp.WithString("kind",
@@ -81,8 +93,7 @@ func (s *Server) registerSourceTools() {
 			"Walk the live checkout at --project-root and return every file whose live content "+
 				"differs from the indexed blob. Only available when serve was launched with --project-root.",
 		),
-		mcp.WithString("target",
-			mcp.Description("Restrict to files linked into this target.")),
+		targetSourcesArg(""),
 		mcp.WithString("path_prefix",
 			mcp.Description("Restrict to files whose project-relative path starts with this prefix.")),
 	), s.handleListSourceDrift)
@@ -114,8 +125,7 @@ func (s *Server) registerSourceTools() {
 		mcp.WithString("kind",
 			mcp.Description("'source' (.c/.C/.cpp/etc.), 'header' (.h/.hpp/.hxx), or 'generated' (is_generated=1)."),
 			mcp.Enum("source", "header", "generated")),
-		mcp.WithString("target",
-			mcp.Description("Restrict to files listed as sources of this target. Excludes generated_sources and external headers.")),
+		targetSourcesArg("Excludes generated_sources and external headers."),
 		mcp.WithBoolean("include_external",
 			mcp.Description("If true, also search external_sources (--include-external headers)."),
 			mcp.DefaultBool(false)),

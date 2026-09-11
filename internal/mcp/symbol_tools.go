@@ -20,14 +20,15 @@ func (s *Server) registerSymbolTools() {
 		mcp.WithDescription(
 			"Fuzzy FTS lookup over symbol names and signatures. Handles identifier-"+
 				"boundary tokenization (add_ints → 'add ints') and prefix matches. "+
-				"Scopeable by symbol kind or by target membership.",
+				"Scopeable by symbol kind or by target membership — but a target-"+
+				"scoped miss is not proof of absence; read the 'target' arg first.",
 		),
 		mcp.WithString("query", mcp.Required(),
 			mcp.Description("Substring or partial identifier. Split on non-alphanumeric boundaries (so 'add_ints' tokenizes to 'add ints') and each token gets a trailing '*' for prefix matching — 'add' matches 'add_ints', 'adder', 'quick_add'. All-punctuation input matches nothing.")),
 		mcp.WithString("kind",
 			mcp.Description("Filter by symbols.kind. Common values: 'function', 'variable', 'typedef' — call describe_schema for the full enum.")),
 		mcp.WithString("target",
-			mcp.Description("Restrict to symbols linked into this target.")),
+			mcp.Description("Restrict to symbols the linker resolved into this target (link_resolutions join). Internal-linkage symbols — a 'static' function, a 'static inline' in a header — never get a link_resolutions row by design, so they are filtered out here even when their code is in the binary (inlined at every call site, or folded by IPA-ICF). An empty target-scoped result therefore means 'no symbol resolved under that name', NOT 'no such code in this target'. Re-run without 'target' and confirm with describe_symbol (per-target link_resolutions) or list_linked_callers before concluding absence.")),
 	), s.handleFindSymbol)
 
 	s.mcp.AddTool(newTool("describe_symbol",
