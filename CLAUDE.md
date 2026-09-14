@@ -1,6 +1,8 @@
 # CLAUDE.md
 
-Working notes for Claude when editing this repo. Read `herbarium-plan.md` first — it is the design contract; this file is orientation on top of it.
+Working notes for Claude when editing this repo. Read `herbarium-plan.md` first — it is the design contract; this file is orientation on top of it. `SCHEMA.md` is the third piece: a table-by-table reference for what a row *means*, which pass writes it, and which compiler artifact the fact came from.
+
+**Check `SCHEMA.md` before proposing a schema change.** It exists because "herbarium doesn't know X" is usually answerable from data already in the index, and the wrong reflex is to add a column each time an agent reports a miss. It also records which corners are inert (`devirt_hints` has no writer at all) and — in § 7 — the one question the schema genuinely cannot answer, which is whether an internal-linkage symbol's code is in a given target. Regenerate it from the code when the schema does move; do not hand-patch it.
 
 ## What this is
 
@@ -20,6 +22,7 @@ Working notes for Claude when editing this repo. Read `herbarium-plan.md` first 
 ## Repo layout
 
 ```
+SCHEMA.md               table-by-table reference: meaning, writing pass, provenance
 cmd/herbarium/          collect + serve subcommands, tiny glue
 internal/
   mesonintrospect/      reads builddir/meson-info/*.json (no meson invocation)
