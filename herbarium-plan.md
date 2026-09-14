@@ -65,7 +65,7 @@ Add all of the following to `c_args`. The simplest way is on the `meson setup` c
 ```bash
 meson setup builddir \
   --buildtype=debugoptimized \
-  -Dc_args="-g -gcolumn-info -fcallgraph-info=su,da -fdump-ipa-cgraph -fdump-ipa-inline -fdump-ipa-devirt -fdump-ipa-icf -fsave-optimization-record -fno-inline-functions-called-once"
+  -Dc_args="-g -gcolumn-info -fcallgraph-info=su,da -fdump-ipa-cgraph -fdump-ipa-inline -fdump-ipa-icf -fsave-optimization-record -fno-inline-functions-called-once"
 ```
 
 What each flag contributes:
@@ -76,14 +76,13 @@ What each flag contributes:
 | `-fcallgraph-info=su,da` | Direct call edges, stack usage, data-area sizes |
 | `-fdump-ipa-cgraph` | Post-IPA callgraph with `address_taken` flags and indirect call site records |
 | `-fdump-ipa-inline` | IPA-stage inlining decisions (source vs runtime edge reconciliation) |
-| `-fdump-ipa-devirt` | Speculative devirtualization hints for indirect calls |
 | `-fdump-ipa-icf` | Identical-code-folded function groups |
 | `-fsave-optimization-record` | Every inliner's decisions — including `pass_early_inline`, which folds `always_inline` and trivial callees before any IPA pass runs and therefore leaves no trace in any `-fdump-ipa-*` dump — plus the rejections with GCC's own reason |
 | `-fno-inline-functions-called-once` | Preserves distinct nodes in the post-IPA `.cgraph` for single-caller helpers even when `-O2` still inlines them out of the `.ci` direct-edge view |
 
 Herbarium enumerates each TU's transitive header set by parsing ninja's consolidated `.ninja_deps` binary file, which Meson/ninja generate as part of build tracking. Ninja folds per-object Makefile-style dependency output into this single file and deletes the per-object sidecars; no extra flag is required.
 
-Buildtype `debugoptimized` gives `-O2 -g`; `-O1` is the minimum for IPA passes (devirt, ICF, inline) to fire meaningfully. `--buildtype=debug` (`-O0`) will produce a valid index but with empty devirt hints and reduced IPA data.
+Buildtype `debugoptimized` gives `-O2 -g`; `-O1` is the minimum for IPA passes (ICF, inline) to fire meaningfully. `--buildtype=debug` (`-O0`) will produce a valid index but with reduced IPA data.
 
 ### Link-side flags (recommended)
 
@@ -104,7 +103,7 @@ Herbarium degrades gracefully if maps are missing: `link_resolutions` falls back
 meson compile -C builddir
 ```
 
-Every `.o` will now be accompanied by `<obj>.ci`, `<source>.NNNi.cgraph`, `<source>.NNNi.inline`, `<source>.NNNi.devirt`, `<source>.NNNi.icf`, `<source>.opt-record.json.gz`, and a `<obj>.d` dependency file (which Meson/ninja emit unconditionally). Linked executables and shared libraries will exist as usual, with DWARF preserved.
+Every `.o` will now be accompanied by `<obj>.ci`, `<source>.NNNi.cgraph`, `<source>.NNNi.inline`, `<source>.NNNi.icf`, `<source>.opt-record.json.gz`, and a `<obj>.d` dependency file (which Meson/ninja emit unconditionally). Linked executables and shared libraries will exist as usual, with DWARF preserved.
 
 ### Validation before indexing
 
@@ -138,7 +137,6 @@ Files the user's build produces, which herbarium ingests:
 | `-fdump-ipa-cgraph` | `<obj>.NNNi.cgraph` | Post-IPA callgraph; `address_taken`, `only_called_directly`, linkage flags; indirect call site list |
 | `-fdump-ipa-inline` | `<obj>.NNNi.inline` | IPA-stage inlining decisions |
 | `-fsave-optimization-record` | `<obj>.opt-record.json.gz` | Gzipped JSON: every pass's inlining decisions, early inliner included, rejections with reasons |
-| `-fdump-ipa-devirt` | `<obj>.NNNi.devirt` | Speculative devirtualization (limited in C, useful when it fires) |
 | `-fdump-ipa-icf` | `<obj>.NNNi.icf` | Identical-code-folded functions (shared linkage address) |
 | `-g -gcolumn-info` | DWARF in `.o` | Symbol identity, decl file/line, def file/line, signatures, typedef chains, struct field names, `DW_TAG_call_site`, `DW_TAG_inlined_subroutine` |
 | Meson/ninja default | `<obj>.d` | Make-format dependency file — transitive header list per TU (no extra flag needed) |
@@ -272,13 +270,6 @@ CREATE TABLE indirect_call_sites (
 );
 CREATE INDEX idx_ics_caller ON indirect_call_sites(caller_id);
 CREATE INDEX idx_ics_type ON indirect_call_sites(callee_type);
-
--- Compiler-reported speculative resolutions of indirect calls
-CREATE TABLE devirt_hints (
-  site_id INTEGER REFERENCES indirect_call_sites(id),
-  callee_id INTEGER REFERENCES symbols(id),
-  confidence TEXT          -- 'speculative' | 'resolved'
-);
 
 -- Inlining, three planes that answer three different questions.
 -- inline_decisions is the .cgraph per-edge tag: IPA-stage only.
@@ -436,11 +427,8 @@ The verdict is decided from the full row set even when the echoed evidence is ca
 **`list_address_taken_functions(fn_ptr_type?, target?)`** — functions whose address is taken somewhere, filterable by canonical fn-pointer type.
 *Benefit:* candidate set for what an indirect call could reach. Combined with a type filter, this narrows dispatch resolution dramatically for well-typed callback tables.
 
-**`resolve_indirect_call(site_id)`** — combines type-compatibility narrowing (from `symbols` + `fn_ptr_type`) with GCC's `-fdump-ipa-devirt` hints (from `devirt_hints`) into a ranked candidate list, tagged by evidence source.
-*Benefit:* the direct answer to "what could this indirect call be calling," using only what the compiler already knows.
-
-**`list_devirt_hints(target?)`** — everywhere GCC's speculative devirtualization pass resolved an indirect call to a specific target.
-*Benefit:* high-confidence indirect resolutions the agent can trust without heuristics.
+**`resolve_indirect_call(site_id)`** — type-compatibility narrowing (address-taken functions whose `symbols.signature` matches the site's `callee_type`), falling back to the full address-taken pool when DWARF left no type. Each candidate is tagged by evidence source.
+*Benefit:* the closest available answer to "what could this indirect call be calling," using only what the compiler already knows. These stay *candidates*: no plane in the index names the actual callee of an indirect call.
 
 ### Linkage and weak symbols
 
@@ -500,14 +488,14 @@ This is not incremental re-ingest (Phase 7, deferred): step 2 is a full rebuild,
 - Verify each dump file lands with the expected format on the pinned GCC version.
 - Sample a TU: confirm `.cgraph` lists indirect call sites with types; confirm DWARF has field names for one struct-of-fn-pointers; confirm `.ci` matches expected direct edges; confirm `-Wl,-Map=` output is well-formed for at least one linked target.
 - Measure build-time overhead of the extra dumps.
-- **Preserve samples as fixtures.** Copy one representative `<obj>.ci`, `<source>.NNNi.cgraph`, `<source>.NNNi.inline`, `<source>.NNNi.devirt`, `<source>.NNNi.icf`, `<obj>.d`, and `<target>.map` from the validation build into `testdata/samples/gcc-<version>/` and check them into the repo. Phases 2 and 4 develop parsers against these fixtures instead of re-collecting samples on every parser change; the samples also anchor the pinned GCC version at code-review time.
+- **Preserve samples as fixtures.** Copy one representative `<obj>.ci`, `<source>.NNNi.cgraph`, `<source>.NNNi.inline`, `<source>.NNNi.icf`, `<obj>.d`, and `<target>.map` from the validation build into `testdata/samples/gcc-<version>/` and check them into the repo. Phases 2 and 4 develop parsers against these fixtures instead of re-collecting samples on every parser change; the samples also anchor the pinned GCC version at code-review time.
 - **Exit criterion:** every planned dump is present, parseable, adds under ~25% build overhead, and sample fixtures are checked in.
 
 ### Phase 1 — Scaffolding (~2 days)
 
 - `cmd/herbarium` binary skeleton: `collect`, `serve` subcommands.
 - `internal/mesonintrospect/` — read `meson-info/intro-targets.json` and `intro-dependencies.json` from the builddir (no invocation of `meson introspect` needed; Meson persists these on `setup`).
-- `internal/builddir/` — builddir crawler: given a builddir, enumerate `.o` files and locate the sibling `.ci`, `.NNNi.cgraph`, `.NNNi.inline`, `.NNNi.devirt`, `.NNNi.icf`, `.i`, and any `.map` files. Skip `builddir/meson-private/` — Meson drops sanity-check compile artifacts there that must not be ingested as real TUs. Dump filenames on GCC 16 land as `<obj-basename>.c.NNNi.<pass>`; parsers glob on the suffix rather than hardcoding pass numbers.
+- `internal/builddir/` — builddir crawler: given a builddir, enumerate `.o` files and locate the sibling `.ci`, `.NNNi.cgraph`, `.NNNi.inline`, `.NNNi.icf`, `.i`, and any `.map` files. Skip `builddir/meson-private/` — Meson drops sanity-check compile artifacts there that must not be ingested as real TUs. Dump filenames on GCC 16 land as `<obj-basename>.c.NNNi.<pass>`; parsers glob on the suffix rather than hardcoding pass numbers.
 - `internal/preflight/` — validate that all required artifacts are present; report specific missing flags with a suggested `meson setup` command line.
 - `internal/store/` — schema init, connection lifecycle, `mode=ro` for serve.
 - `internal/blobstore/` — content-addressed blob writer with zstd.
@@ -519,10 +507,9 @@ This is not incremental re-ingest (Phase 7, deferred): step 2 is a full rebuild,
 - `internal/gccdump/inline.go` — parse `-fdump-ipa-inline` for inline decisions (supplementary; `.cgraph`'s `(inlined)` tag on the `Called:` line is the primary source). Both are IPA-stage views.
 - `internal/gccdump/optrecord.go` — parse `<obj>.opt-record.json.gz` (`-fsave-optimization-record`). Keeps the records whose pass carries the `inline` optgroup — the same selector `-fopt-info-inline` uses — so the vectorizer records in the same file are dropped without naming them. The two node references in a message are ordered by the message's own wording (`Inlined <callee> into <caller>` vs `not inlinable: <caller> -> <callee>`), so the parser reads the separator rather than assuming a position, and drops any record matching neither: a reversed inline edge would be worse than a missing one.
 - `internal/gccdump/icf.go` — parse `-fdump-ipa-icf` for folded groups (returns empty on fixtures without folding; Phase 8's fixture forces ICF to fire).
-- `internal/gccdump/devirt.go` — parse `-fdump-ipa-devirt` for speculative resolutions. Almost always empty in pure C — `devirt_hints` table stays empty until we see a firing case.
 - `internal/usr/` — USR synthesis per the appendix. Handles GCC clone suffixes (`.constprop.N`, `.isra.N`) by aliasing to the parent's USR and recording the linkage name on the parent.
 - `internal/ingest/` orchestrator: two-phase per-TU aggregation (non-clones first, then clones), cross-TU merge, edge resolution via per-TU local-id → USR maps, cross-TU edge dedup (multi-executable `main` collapses to one identity — see Appendix: Symbols and definitions).
-- Populate `symbols`, `symbol_definitions` (identity + per-def location), `call_edges (source='compiler_cgraph')`, `inline_decisions`, `inline_records`. The optimization record joins by cgraph node order — the same local ids `.cgraph` uses — which is what lets a clone (`use_dispatch.constprop/12`) resolve to its parent's USR; a name lookup could not. `indirect_call_sites` and `devirt_hints` are populated in Phase 3 (DWARF adds file/line/column that `.cgraph` lacks).
+- Populate `symbols`, `symbol_definitions` (identity + per-def location), `call_edges (source='compiler_cgraph')`, `inline_decisions`, `inline_records`. The optimization record joins by cgraph node order — the same local ids `.cgraph` uses — which is what lets a clone (`use_dispatch.constprop/12`) resolve to its parent's USR; a name lookup could not. `indirect_call_sites` is populated in Phase 3 (DWARF adds file/line/column that `.cgraph` lacks).
 
 ### Phase 3 — DWARF ingest (~3 days)
 
@@ -621,8 +608,8 @@ Skipped by user decision after Phase 6. `herbarium collect` always writes a fres
 **Weak-symbol resolution without a linker map.** Not all users will add `-Wl,-Map`.
 *Mitigation:* herbarium degrades gracefully — `link_resolutions` falls back to a per-.o `nm` scan across the builddir for both `winning_object` (strong > weak > local heuristic) and `losing_objects` (candidates minus winner). Weak-vs-strong resolution is correctly identified. The single remaining ambiguous case is two same-named statics in two TUs of the same target with no map file — those fall back to name lookup and may misattribute.
 
-**IPA dumps require an optimization level.** `-fdump-ipa-cgraph` runs at any `-O`, but devirt and ICF fire meaningfully only at `-O1+`.
-*Mitigation:* Prerequisites recommend `--buildtype=debugoptimized` (`-O2 -g`). At `-O0` the index is still valid but `devirt_hints` and `icf` groups will be empty; the affected MCP tools return empty results and their descriptions note this.
+**IPA dumps require an optimization level.** `-fdump-ipa-cgraph` runs at any `-O`, but ICF fires meaningfully only at `-O1+`.
+*Mitigation:* Prerequisites recommend `--buildtype=debugoptimized` (`-O2 -g`). At `-O0` the index is still valid but `icf` groups will be empty; the affected MCP tools return empty results and their descriptions note this.
 
 **Builddir and source root out of sync.** User points herbarium at a builddir whose sources have been checked out to a different commit than the source root passed in.
 *Mitigation:* every source file listed by Meson introspection must exist under `--project-root` at ingest time; herbarium refuses if any are missing. This bounds the failure mode to files the user has moved outright, not merely modified.

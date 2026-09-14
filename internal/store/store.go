@@ -71,7 +71,24 @@ import (
 // serve cannot otherwise tell the two apart: a v7 artifact answers "what
 // is defined in this header" with zero rows and nothing marks the answer
 // as stale. Re-collect to pick up the corrected locations.
-const SchemaVersion = "8"
+//
+// v8 -> v9: drops devirt_hints, and with it the list_devirt_hints tool
+// and the .devirt parser. The table never had a writer, so no index ever
+// held a row -- but the deeper reason is that it never could. GCC's
+// ipa-devirt pass acts on polymorphic calls, which come from C++
+// OBJ_TYPE_REF nodes; C emits none, so every .devirt dump reports "0
+// polymorphic calls, 0 devirtualized, 0 speculatively devirtualized".
+// The one section carrying real C data -- "Noted function pointers
+// stored in records" -- appears only for a static const dispatch table,
+// is absent from real-world code that assigns its function pointers at
+// registration time, and where it does appear DWARF already answers
+// better: a field name via dwarfingest/calltarget.go, not a byte offset
+// that would need DWARF to resolve anyway. Everything else .devirt
+// carried is a strict subset of .cgraph, which ingest already requires
+// and parses. Dropping it also removes -fdump-ipa-devirt from the
+// required c_args, so a v9 collect needs one flag fewer than v8 and GCC
+// writes one dump fewer per TU.
+const SchemaVersion = "9"
 
 //go:embed schema.sql
 var schemaSQL string

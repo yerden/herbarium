@@ -23,7 +23,7 @@ meson setup builddir \
   --buildtype=debugoptimized \
   -Dc_args="-g -gcolumn-info -fcallgraph-info=su,da \
             -fdump-ipa-cgraph -fdump-ipa-inline \
-            -fdump-ipa-devirt -fdump-ipa-icf \
+            -fdump-ipa-icf \
             -fsave-optimization-record"
 ```
 
@@ -39,7 +39,6 @@ stock build, so the index describes the binary you ship.
 | `-fcallgraph-info=su,da` | Direct call edges, stack usage, data-area sizes | None — writes a `.ci` file |
 | `-fdump-ipa-cgraph` | Post-IPA callgraph, `address_taken` flags, indirect call sites | None — writes a dump file |
 | `-fdump-ipa-inline` | Inline decisions | None — writes a dump file |
-| `-fdump-ipa-devirt` | Speculative devirtualization hints | None — writes a dump file |
 | `-fdump-ipa-icf` | ICF-folded function groups | None — writes a dump file |
 | `-fsave-optimization-record` | Every inliner's decisions, rejections and reasons included — the only route to the early inliner, which folds `always_inline` and trivial callees before any IPA pass runs | None — writes a gzipped JSON file |
 
@@ -84,7 +83,7 @@ Notes on the three:
 meson compile -C builddir
 ```
 
-The `.ci`, `.cgraph`, `.inline`, `.devirt`, and `.icf` dumps land beside each
+The `.ci`, `.cgraph`, `.inline`, and `.icf` dumps land beside each
 `.o`. They can be deleted after a successful collect with no loss of index
 correctness — the next collect just needs them again.
 
@@ -133,7 +132,7 @@ that pass crawls `.o` files rather than targets:
 | `symbols`, `symbol_definitions`, signatures | `targets` rows |
 | `call_edges` (source-view, from `.cgraph`) | `call_edges` (runtime-view, from `objdump`) |
 | Inlining: records, decisions, DWARF instances | `link_resolutions`, `symbol_reachability` |
-| Indirect call sites, devirt hints, ICF groups | |
+| Indirect call sites, ICF groups | |
 | Packed sources and headers — **all of them**, including files belonging to targets you excluded | |
 
 So `find_symbol`, `describe_symbol`, `list_callers`/`list_callees`,
@@ -175,7 +174,7 @@ herbarium preflight failed for builddir
 herbarium serve --hbr myproject.hbr --check
 ```
 
-Opens the `.hbr` read-only, registers all 30 tools, prints
+Opens the `.hbr` read-only, registers all 29 tools, prints
 `herbarium serve --check: … opens (schema N)`, and exits. This catches a schema
 mismatch between binary and artifact before opencode sees a transport that dies
 on startup.

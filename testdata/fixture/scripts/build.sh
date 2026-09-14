@@ -11,7 +11,6 @@ c_args=(
   -fcallgraph-info=su,da
   -fdump-ipa-cgraph
   -fdump-ipa-inline
-  -fdump-ipa-devirt
   -fdump-ipa-icf
   -fsave-optimization-record
   -fno-inline-functions-called-once

@@ -89,10 +89,6 @@ var SchemaEnums = []SchemaEnum{
 		Notes:  "compiler_cgraph rows carry NULL target_id (source-view, target-agnostic). objdump rows are per-target and post-optimization.",
 	},
 	{
-		Column: "devirt_hints.confidence",
-		Values: []string{"speculative", "resolved"},
-	},
-	{
 		Column: "inline_records.pass",
 		Values: []string{"einline", "inline"},
 		Notes:  "einline is GCC's early inliner — it runs before any IPA pass and is the only pass that folds always_inline, so its rows have no counterpart in inline_decisions or the .cgraph dump. inline is the IPA inliner. The same call can appear under both passes.",

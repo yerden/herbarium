@@ -50,9 +50,6 @@ func TestCrawlFixture(t *testing.T) {
 		if o.Inline == "" {
 			t.Errorf("%s: missing .inline", o.Object)
 		}
-		if o.Devirt == "" {
-			t.Errorf("%s: missing .devirt", o.Object)
-		}
 		if o.ICF == "" {
 			t.Errorf("%s: missing .icf", o.Object)
 		}

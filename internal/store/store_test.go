@@ -26,7 +26,7 @@ func TestInitAndReopen(t *testing.T) {
 		"meta", "targets", "target_sources",
 		"blobs", "sources",
 		"symbols", "symbols_fts", "symbol_definitions",
-		"call_edges", "indirect_call_sites", "devirt_hints",
+		"call_edges", "indirect_call_sites",
 		"inline_decisions", "link_resolutions", "symbol_reachability",
 		"external_sources", "generated_sources",
 	}

@@ -162,7 +162,7 @@ func TestCheckNoDebugInfo(t *testing.T) {
 	}
 	// Also drop a valid-looking CI/Cgraph so those checks pass and
 	// isolate the debug-info branch.
-	for _, ext := range []string{".ci", ".000i.cgraph", ".095i.inline", ".090i.devirt", ".089i.icf"} {
+	for _, ext := range []string{".ci", ".000i.cgraph", ".095i.inline", ".089i.icf"} {
 		if err := os.WriteFile(filepath.Join(tmpDir, "not-an-elf"+ext), []byte{}, 0o644); err != nil {
 			t.Fatalf("touch %s: %v", ext, err)
 		}

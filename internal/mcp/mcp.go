@@ -20,7 +20,7 @@
 //                              explain_call
 //   indirect_tools.go          list_indirect_call_sites,
 //                              list_address_taken_functions,
-//                              resolve_indirect_call, list_devirt_hints
+//                              resolve_indirect_call
 //   linkage_tools.go           describe_link_resolution, list_weak_symbols,
 //                              list_undefined_symbols, list_icf_groups,
 //                              list_unreachable_symbols, list_entry_points

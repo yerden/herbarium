@@ -147,13 +147,6 @@ CREATE TABLE indirect_call_sites (
 CREATE INDEX idx_ics_caller ON indirect_call_sites(caller_id);
 CREATE INDEX idx_ics_type   ON indirect_call_sites(callee_type);
 
--- Compiler-reported speculative resolutions of indirect calls
-CREATE TABLE devirt_hints (
-  site_id    INTEGER REFERENCES indirect_call_sites(id),
-  callee_id  INTEGER REFERENCES symbols(id),
-  confidence TEXT               -- 'speculative' | 'resolved'
-);
-
 -- Inlining record (for source-vs-runtime reconciliation)
 CREATE TABLE inline_decisions (
   caller_id INTEGER REFERENCES symbols(id),

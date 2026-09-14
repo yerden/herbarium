@@ -208,28 +208,6 @@ func TestResolveIndirectCallUnknown(t *testing.T) {
 	}
 }
 
-func TestListDevirtHintsEmpty(t *testing.T) {
-	// The fixture has no devirt hits (pure C, IPA-devirt rarely fires).
-	// Tool must return Total=0 without erroring.
-	client := startClient(t, fixtureHBR(t))
-	req := mcp.CallToolRequest{}
-	req.Params.Name = "list_devirt_hints"
-	res, err := client.CallTool(context.Background(), req)
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
-	if res.IsError {
-		t.Fatalf("error: %s", textOf(t, res))
-	}
-	var payload herbmcp.ListDevirtHintsResponse
-	if err := json.Unmarshal([]byte(textOf(t, res)), &payload); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if payload.Total != 0 {
-		t.Errorf("Total = %d, want 0 for fixture", payload.Total)
-	}
-}
-
 // Snippets are the dominant per-row cost, and this tool can return one
 // row per indirect call in a whole target.
 func TestListIndirectCallSitesPayloadLimits(t *testing.T) {

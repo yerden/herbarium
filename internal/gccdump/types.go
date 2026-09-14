@@ -160,20 +160,6 @@ type ICFDump struct {
 	Groups []ICFGroup
 }
 
-// DevirtHit is one speculative resolution recorded by the ipa-devirt pass.
-type DevirtHit struct {
-	CallerName string
-	// TargetName is the callee GCC speculatively resolved to. In pure C
-	// this rarely fires; parser tolerates empty.
-	TargetName string
-	Confidence string // "speculative" or "resolved"
-}
-
-// DevirtDump is the top-level result of parsing a .devirt file.
-type DevirtDump struct {
-	Hits []DevirtHit
-}
-
 // InlineRecord is one inlining decision from GCC's optimization record
 // (-fsave-optimization-record). Unlike the .cgraph `(inlined)` tag it
 // covers every inliner GCC runs — the early passes that fire before IPA

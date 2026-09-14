@@ -96,8 +96,8 @@ call site or that it was truly stripped. To disambiguate:
 - `herbarium_list_indirect_call_sites` — indirect calls are invisible to
   both cgraph and objdump edge lists. If the only path to a symbol goes
   through a function pointer (`.fn` fields, handler tables), neither view
-  shows it. Check `herbarium_list_devirt_hints` and
-  `herbarium_list_address_taken_functions` too.
+  shows it. Check `herbarium_list_address_taken_functions` and
+  `herbarium_resolve_indirect_call` too.
 
 ### Semantics cheat sheet
 

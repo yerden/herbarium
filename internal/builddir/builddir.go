@@ -23,7 +23,6 @@ type ObjectArtifacts struct {
 	CI           string // -fcallgraph-info output
 	Cgraph       string // -fdump-ipa-cgraph
 	Inline       string // -fdump-ipa-inline
-	Devirt       string // -fdump-ipa-devirt
 	ICF          string // -fdump-ipa-icf
 	OptRecord    string // -fsave-optimization-record (gzipped JSON)
 	Preprocessed string // .i (only when -save-temps is in effect)
@@ -128,7 +127,6 @@ func resolveSidecars(obj string) ObjectArtifacts {
 	}{
 		{".cgraph", &art.Cgraph},
 		{".inline", &art.Inline},
-		{".devirt", &art.Devirt},
 		{".icf", &art.ICF},
 	} {
 		// Try both conventions: <base>.NNNi.pass and <base>.c.NNNi.pass.

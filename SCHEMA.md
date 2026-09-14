@@ -10,14 +10,14 @@ It exists so that "herbarium doesn't know X" can be checked against the
 schema before anyone reaches for a new column. Regenerate it from the
 code when the schema moves — do not hand-patch it.
 
-18 tables, 1 view, 1 FTS index.
+17 tables, 1 view, 1 FTS index.
 
 Provenance abbreviations used below:
 
 | Short | Means |
 |---|---|
 | **MI** | `builddir/meson-info/*.json`, read by `internal/mesonintrospect` |
-| **.ci / .cgraph / .inline / .icf / .devirt** | GCC dump sidecars beside each `.o`, parsed by `internal/gccdump` |
+| **.ci / .cgraph / .inline / .icf** | GCC dump sidecars beside each `.o`, parsed by `internal/gccdump` |
 | **OR** | `-fsave-optimization-record` JSON (`*.opt-record.json.gz`) |
 | **DWARF** | `debug/dwarf` over each `.o`, via `internal/dwarfingest` |
 | **nm / objdump / .map** | binutils run at collect time, via `internal/linkplane` |
@@ -122,7 +122,6 @@ Two structural facts that bite:
 |---|---|---|---|
 | `call_edges` | one direct call | `ingest.Compiler` writes `source='compiler_cgraph'` with `target_id` NULL; `ingest.Link` writes `source='objdump'` with `target_id` set | `.cgraph` `Called:` lists; disassembly of each linked binary |
 | `indirect_call_sites` | one `DW_TAG_call_site` carrying no `DW_AT_call_origin` | `ingest.DWARF` | `caller_id` from the innermost enclosing **inlined-subroutine** name; `file`/`line` resolved from `DW_AT_call_return_pc` through the CU line table; `callee_type`/`field_hint` from `DW_AT_call_target` or the `R_X86_64_PC32` relocation at `return_pc-4` |
-| `devirt_hints` | *(nothing — see below)* | **nobody** | — |
 
 `call_edges` is one table holding two incompatible planes, separated
 only by `source`. A `compiler_cgraph` row is pre-inlining and
@@ -135,13 +134,32 @@ enclosing symbol: when a call comes from code inlined out of F into G,
 header is the header's inline function, with everything that implies for
 internal linkage.
 
-**`devirt_hints` has no writer and is empty in every index ever built.**
-`internal/builddir` locates the `.devirt` dump, `ingest.go` parses it
-into `tu.devirt`, and no `INSERT` ever follows — the parsed data is
-dropped. `list_devirt_hints` therefore always returns zero rows, and
-`resolve_indirect_call`'s "GCC devirtualization hints" evidence leg is
-unreachable. An empty result from either is a herbarium gap, never a
-statement about what GCC did or did not devirtualize.
+**There is no devirtualization plane, and there cannot be one for C.**
+A `devirt_hints` table, a `list_devirt_hints` tool and a `.devirt`
+parser existed through schema v8; none ever held or returned a row. The
+table had no writer, but the deeper reason it was removed in v9 is that
+GCC's ipa-devirt pass acts on *polymorphic* calls — `OBJ_TYPE_REF` nodes,
+which only C++ emits. Every `.devirt` dump herbarium has been pointed at,
+fixture and production alike, reports `0 polymorphic calls, 0
+devirtualized, 0 speculatively devirtualized`.
+
+The one section of that dump carrying real C data was
+`Noted function pointers stored in records`, a `(struct type, byte
+offset) → function` table. It appears only where a dispatch table is a
+`const` record with a static initializer, is absent from code that
+assigns its function pointers at registration time, and where it does
+appear DWARF already answers the same question better — `field_hint`
+gives the *field name* (`ops.add`), not an offset that would need DWARF
+to resolve anyway. Everything else `.devirt` carried is a strict subset
+of `.cgraph`, which ingest requires and parses regardless: on the
+fixture's `dispatch_impls.c`, `.cgraph` has 12 `Address is taken.` lines
+and 18 `(addr)` references where `.devirt` has 2 and 3, because `.cgraph`
+dumps at pass `000i`, before unreachable-node pruning.
+
+So `resolve_indirect_call` narrows by type-compatibility over
+address-taken functions and nothing else. Its output is a **candidate
+list, never a resolution** — no plane in this index names the actual
+callee of an indirect call.
 
 ## 5. Inlining plane — three tables that disagree on purpose
 
@@ -226,7 +244,6 @@ All confirmed by grep against the current tree, not inferred:
 
 | What | Status |
 |---|---|
-| `devirt_hints` | no writer; empty in every index |
 | `meta.build_config_hash` | listed in `schema.sql`, never stamped |
 | `symbol_reachability.section_kept` | constant 1; parsing "Discarded input sections" is future work |
 | `usr.Typedef` | defined, no caller |

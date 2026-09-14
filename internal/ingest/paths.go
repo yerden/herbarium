@@ -1,7 +1,7 @@
 // Package ingest orchestrates per-TU dump parsing, USR synthesis, and
 // database population for `herbarium collect`. Phase 2 populates the
 // compiler-plane tables (symbols, call_edges, indirect_call_sites,
-// inline_decisions, devirt_hints). Phases 3–5 add DWARF, link plane,
+// inline_decisions). Phases 3–5 add DWARF, link plane,
 // and source blobs — this package is the join point.
 package ingest
 

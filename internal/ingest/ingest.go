@@ -19,7 +19,6 @@ type tuData struct {
 	cgraph *gccdump.Cgraph
 	inline *gccdump.InlineDump
 	icf    *gccdump.ICFDump
-	devirt *gccdump.DevirtDump
 	optRec *gccdump.OptRecordDump
 }
 
@@ -383,11 +382,6 @@ func parseTU(art builddir.ObjectArtifacts) (*tuData, error) {
 	}
 	if art.ICF != "" {
 		if tu.icf, err = gccdump.ParseICFFile(art.ICF); err != nil {
-			return nil, err
-		}
-	}
-	if art.Devirt != "" {
-		if tu.devirt, err = gccdump.ParseDevirtFile(art.Devirt); err != nil {
 			return nil, err
 		}
 	}

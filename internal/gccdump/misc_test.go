@@ -83,20 +83,6 @@ func TestParseICFFolded(t *testing.T) {
 	}
 }
 
-func TestParseDevirtEmpty(t *testing.T) {
-	// Pure C dumps rarely produce devirt hits — the fixture has none.
-	d, err := gccdump.ParseDevirtFile(filepath.Join(
-		repoRoot(t), "testdata", "samples", "gcc-16",
-		"app1", "main.c.c.090i.devirt",
-	))
-	if err != nil {
-		t.Fatalf("ParseDevirtFile: %v", err)
-	}
-	if len(d.Hits) != 0 {
-		t.Errorf("expected zero devirt hits on fixture, got %d", len(d.Hits))
-	}
-}
-
 func ids(ss []gccdump.InlineSummary) []string {
 	out := make([]string, len(ss))
 	for i, s := range ss {

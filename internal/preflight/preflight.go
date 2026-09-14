@@ -25,7 +25,7 @@ const MinGCCMajor = 10
 // build. That matters: the index describes the binary the user actually
 // ships, which is the whole point of indexing compiler output.
 const RecommendedCArgs = "-g -gcolumn-info -fcallgraph-info=su,da " +
-	"-fdump-ipa-cgraph -fdump-ipa-inline -fdump-ipa-devirt -fdump-ipa-icf " +
+	"-fdump-ipa-cgraph -fdump-ipa-inline -fdump-ipa-icf " +
 	"-fsave-optimization-record"
 
 // OptionalCallGraphCArgs is deliberately NOT part of RecommendedCArgs and is

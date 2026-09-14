@@ -2,14 +2,14 @@
 
 Working notes for Claude when editing this repo. Read `herbarium-plan.md` first — it is the design contract; this file is orientation on top of it. `SCHEMA.md` is the third piece: a table-by-table reference for what a row *means*, which pass writes it, and which compiler artifact the fact came from.
 
-**Check `SCHEMA.md` before proposing a schema change.** It exists because "herbarium doesn't know X" is usually answerable from data already in the index, and the wrong reflex is to add a column each time an agent reports a miss. It also records which corners are inert (`devirt_hints` has no writer at all) and — in § 7 — the one question the schema genuinely cannot answer, which is whether an internal-linkage symbol's code is in a given target. Regenerate it from the code when the schema does move; do not hand-patch it.
+**Check `SCHEMA.md` before proposing a schema change.** It exists because "herbarium doesn't know X" is usually answerable from data already in the index, and the wrong reflex is to add a column each time an agent reports a miss. It also records which corners are inert and — in § 7 — the one question the schema genuinely cannot answer, which is whether an internal-linkage symbol's code is in a given target. Regenerate it from the code when the schema does move; do not hand-patch it.
 
 ## What this is
 
 `herbarium` ingests an already-built Meson C project into a single SQLite artifact (`.hbr`) and serves it over MCP for AI agents. Every fact in the index traces back to a compiler dump (GCC's `-fcallgraph-info`, `-fdump-ipa-*`), DWARF, or a binutils inspector (`nm`, `objdump`) — never to a re-parser. Two subcommands:
 
 - `herbarium collect` — reads a builddir + project-root, writes an `.hbr`.
-- `herbarium serve` — opens an `.hbr` read-only, exposes 30 MCP tools over stdio or streamable HTTP.
+- `herbarium serve` — opens an `.hbr` read-only, exposes 29 MCP tools over stdio or streamable HTTP.
 
 ## Non-negotiables (from `herbarium-plan.md § Design principles`)
 
@@ -31,12 +31,12 @@ internal/
   store/                schema.sql + open/init/ro helpers
   blobstore/            zstd + SHA-256 content-addressed blob writer
   ninjadeps/            hand-rolled parser for ninja's binary .ninja_deps log
-  gccdump/              per-dump-kind parsers (ci, cgraph, inline, icf, devirt, optrecord)
+  gccdump/              per-dump-kind parsers (ci, cgraph, inline, icf, optrecord)
   dwarfingest/          DWARF reader (subprograms, signatures, call sites, inlined bodies)
   linkplane/            nm + objdump + map file parsers; runTool wraps exec
   usr/                  USR synthesis per herbarium-plan.md appendix
   ingest/               pipeline orchestrator: Compiler, DWARF, Targets, Link, Sources
-  mcp/                  MCP server + 30 tools; tests build fixture .hbr in-process
+  mcp/                  MCP server + 29 tools; tests build fixture .hbr in-process
 testdata/
   fixture/              minimal Meson project the tests build against
   samples/gcc-16/       pinned parser fixtures (dump files, map files, .ninja_deps)
@@ -67,7 +67,7 @@ This is a *fast slice*, not a partial index: compiler-plane ingest processes eve
 
 ## MCP tools (Phase 6, landed)
 
-30 tools grouped by file under `internal/mcp/`. Every location-returning tool wraps its position in a uniform `Location{path, line?, column?, blob_hash, snippet?, absolute_path?}` shape (see `location.go`). Response payloads land as both `text` (JSON pretty-printed) and `StructuredContent` on the `CallToolResult` — an agent can consume either. Tool descriptions are the user-facing contract; edit them if behavior changes.
+29 tools grouped by file under `internal/mcp/`. Every location-returning tool wraps its position in a uniform `Location{path, line?, column?, blob_hash, snippet?, absolute_path?}` shape (see `location.go`). Response payloads land as both `text` (JSON pretty-printed) and `StructuredContent` on the `CallToolResult` — an agent can consume either. Tool descriptions are the user-facing contract; edit them if behavior changes.
 
 Groups:
 
@@ -83,7 +83,7 @@ Groups:
 - **Call graph, runtime view:** `list_linked_callers`, `list_linked_callees`, `describe_inlining` (three planes: `records`, `instances`, `cgraph_edges`), `list_inline_instances`, `explain_call` (one verdict for one call, with its evidence).
 
 **Response-size contract.** Every tool whose result set scales with the project — `describe_inlining`, `list_inline_instances`, `explain_call`, `list_indirect_call_sites`, `list_unreachable_symbols`, `list_entry_points`, `search_source` — takes `limit` (`rowLimit`, max 2000) and reports `truncated`, and every location-returning one takes `include_snippets` (`wantSnippets`, default **off**). Declare both with `limitArg(default)` / `snippetArg()` from `location.go` so the wording stays identical. The inlining tools additionally answer summary-first: `summary` (exact totals, by pass, by inline depth) is computed over every matching row, the row arrays are capped at 50 (`limit`, max 1000) with a `truncated` flag, and snippets are off unless `include_snippets=true`. This is not tidiness — a row costs ~500 bytes without a snippet and ~700 with one, three arrays ship in one response, and an aggressively inlined caller produced enough rows to exceed an MCP client's output limit and have the *whole* payload truncated by the harness, which is worse than any cap. `explain_call` is the exception that proves the rule: its verdict is always decided from the full row set (`verdictScanLimit`) and only the echoed evidence is capped, because a verdict computed from truncated rows could be flatly wrong.
-- **Indirect:** `list_indirect_call_sites`, `list_address_taken_functions`, `resolve_indirect_call`, `list_devirt_hints`.
+- **Indirect:** `list_indirect_call_sites`, `list_address_taken_functions`, `resolve_indirect_call`. There is no devirtualization plane: GCC's ipa-devirt pass acts on polymorphic calls, which only C++ produces, so `-fdump-ipa-devirt` reported `0 polymorphic calls, 0 devirtualized` on every TU herbarium has ever seen. The table, the tool and the parser were removed in schema v9 — see `store.SchemaVersion`'s v8 → v9 note. `resolve_indirect_call` returns *candidates*, never a resolution.
 - **Linkage + reachability:** `describe_link_resolution`, `list_weak_symbols`, `list_undefined_symbols`, `list_icf_groups`, `list_unreachable_symbols`, `list_entry_points`.
 - **Session:** `reload_index` (see below).
 

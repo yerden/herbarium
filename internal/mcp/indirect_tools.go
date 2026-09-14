@@ -26,8 +26,8 @@ func (s *Server) registerIndirectTools() {
 				"fn-pointer or a fn-pointer parameter). Both are recovered from "+
 				"DWARF and are empty when the compiler kept no trace of the target. "+
 				"Filterable by caller USR, callee_type, or target. Feed a site_id "+
-				"into resolve_indirect_call to get a candidate callee list combining "+
-				"devirt hints and type-compatible address-taken functions.",
+				"into resolve_indirect_call to get a candidate callee list of "+
+				"type-compatible address-taken functions.",
 		),
 		mcp.WithString("caller_usr",
 			mcp.Description("USR of the enclosing function (from find_symbol.hits[].usr or describe_symbol.usr). Omit for all sites.")),
@@ -53,27 +53,19 @@ func (s *Server) registerIndirectTools() {
 
 	s.mcp.AddTool(newTool("resolve_indirect_call",
 		mcp.WithDescription(
-			"Best-effort candidate list for one indirect callsite. Combines: "+
-				"(a) GCC devirtualization hints, (b) address-taken functions whose "+
-				"signature matches the site's callee_type. When DWARF left no "+
-				"callee_type for the site, falls back to every address-taken "+
-				"function — much broader. Each candidate is tagged with its "+
-				"evidence source, so the fallback is distinguishable ('address_taken' "+
-				"vs 'type_match').",
+			"Best-effort candidate list for one indirect callsite: address-taken "+
+				"functions whose signature matches the site's callee_type. When "+
+				"DWARF left no callee_type for the site, falls back to every "+
+				"address-taken function — much broader. Each candidate is tagged "+
+				"with its evidence source, so the fallback is distinguishable "+
+				"('address_taken' vs 'type_match'). These are candidates, never a "+
+				"resolution: herbarium has no plane that names the actual callee "+
+				"of an indirect call.",
 		),
 		mcp.WithNumber("site_id", mcp.Required(),
 			mcp.Description("indirect_call_sites.id — from list_indirect_call_sites.")),
 	), s.handleResolveIndirectCall)
 
-	s.mcp.AddTool(newTool("list_devirt_hints",
-		mcp.WithDescription(
-			"Everywhere GCC's speculative-devirtualization pass resolved an indirect "+
-				"call to a specific target. High-confidence signals the agent can trust "+
-				"without heuristics.",
-		),
-		mcp.WithString("target",
-			mcp.Description("Restrict to hints whose caller is reachable in this target.")),
-	), s.handleListDevirtHints)
 }
 
 // -- list_indirect_call_sites ----------------------------------------
@@ -233,7 +225,7 @@ func (s *Server) handleListAddressTakenFunctions(_ context.Context, req mcp.Call
 // ResolveCandidate is one candidate in resolve_indirect_call.
 type ResolveCandidate struct {
 	Symbol     SymbolRef `json:"symbol"`
-	Evidence   string    `json:"evidence"`   // 'devirt' | 'type_match' | 'address_taken'
+	Evidence   string    `json:"evidence"`   // 'type_match' | 'address_taken'
 	Confidence string    `json:"confidence"` // 'resolved' | 'speculative' | 'candidate'
 }
 
@@ -299,34 +291,7 @@ func (s *Server) handleResolveIndirectCall(_ context.Context, req mcp.CallToolRe
 		resp.Candidates = append(resp.Candidates, ResolveCandidate{Symbol: sym, Evidence: evidence, Confidence: confidence})
 	}
 
-	// (1) GCC's devirt hints — the strongest signal.
-	devRows, err := s.db.Query(`
-		SELECT s.usr, s.name, s.kind, IFNULL(s.signature, ''), d.confidence
-		FROM devirt_hints d
-		JOIN symbols s ON s.id = d.callee_id
-		WHERE d.site_id = ?`, siteID)
-	if err != nil {
-		return mcp.NewToolResultError("devirt hints: " + err.Error()), nil
-	}
-	for devRows.Next() {
-		var sym SymbolRef
-		var confidence string
-		if err := devRows.Scan(&sym.USR, &sym.Name, &sym.Kind, &sym.Signature, &confidence); err != nil {
-			devRows.Close()
-			return mcp.NewToolResultError("scan devirt: " + err.Error()), nil
-		}
-		if confidence == "" {
-			confidence = "speculative"
-		}
-		upsert(sym, "devirt", confidence)
-	}
-	if err := devRows.Err(); err != nil {
-		devRows.Close()
-		return mcp.NewToolResultError("devirt iterate: " + err.Error()), nil
-	}
-	devRows.Close()
-
-	// (2) Type-compatibility narrowing. Only useful when callee_type is
+	// Type-compatibility narrowing. Only useful when callee_type is
 	// populated. Match against symbols.signature (address_taken=1).
 	if calleeType != "" {
 		typRows, err := s.db.Query(`
@@ -383,82 +348,10 @@ func (s *Server) handleResolveIndirectCall(_ context.Context, req mcp.CallToolRe
 
 func evidenceRank(e string) int {
 	switch e {
-	case "devirt":
-		return 3
 	case "type_match":
 		return 2
 	case "address_taken":
 		return 1
 	}
 	return 0
-}
-
-// -- list_devirt_hints -----------------------------------------------
-
-// DevirtHint is one row of list_devirt_hints.
-type DevirtHint struct {
-	SiteID     int64     `json:"site_id"`
-	Caller     SymbolRef `json:"caller"`
-	Callee     SymbolRef `json:"callee"`
-	Location   Location  `json:"location"`
-	Confidence string    `json:"confidence"`
-}
-
-// ListDevirtHintsResponse is what list_devirt_hints returns.
-type ListDevirtHintsResponse struct {
-	Hints []DevirtHint `json:"hints"`
-	Total int          `json:"total"`
-}
-
-func (s *Server) handleListDevirtHints(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	target := req.GetString("target", "")
-
-	sqlText := `
-		SELECT d.site_id,
-		       caller.usr, caller.name, caller.kind, IFNULL(caller.signature, ''),
-		       callee.usr, callee.name, callee.kind, IFNULL(callee.signature, ''),
-		       IFNULL(ics.file, ''), IFNULL(ics.line, 0), IFNULL(ics.column, 0),
-		       d.confidence
-		FROM devirt_hints d
-		JOIN indirect_call_sites ics ON ics.id = d.site_id
-		JOIN symbols caller ON caller.id = ics.caller_id
-		JOIN symbols callee ON callee.id = d.callee_id
-		WHERE 1=1`
-	var args []any
-	if target != "" {
-		sqlText += ` AND EXISTS (
-			SELECT 1 FROM symbol_reachability r
-			JOIN targets t ON t.id = r.target_id
-			WHERE r.symbol_id = caller.id AND r.reachable = 1 AND t.name = ?
-		)`
-		args = append(args, target)
-	}
-	sqlText += ` ORDER BY ics.file, ics.line, ics.column`
-
-	rows, err := s.db.Query(sqlText, args...)
-	if err != nil {
-		return mcp.NewToolResultError("list_devirt_hints: " + err.Error()), nil
-	}
-	defer rows.Close()
-	var out []DevirtHint
-	for rows.Next() {
-		var h DevirtHint
-		var file string
-		var line, col int
-		if err := rows.Scan(
-			&h.SiteID,
-			&h.Caller.USR, &h.Caller.Name, &h.Caller.Kind, &h.Caller.Signature,
-			&h.Callee.USR, &h.Callee.Name, &h.Callee.Kind, &h.Callee.Signature,
-			&file, &line, &col, &h.Confidence,
-		); err != nil {
-			return mcp.NewToolResultError("scan: " + err.Error()), nil
-		}
-		h.Location = Location{Path: file, Line: line, Column: col}
-		s.enrichLocation(&h.Location, false)
-		out = append(out, h)
-	}
-	if err := rows.Err(); err != nil {
-		return mcp.NewToolResultError("iterate: " + err.Error()), nil
-	}
-	return jsonResult(ListDevirtHintsResponse{Hints: out, Total: len(out)})
 }
