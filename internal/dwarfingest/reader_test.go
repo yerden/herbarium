@@ -158,8 +158,66 @@ func TestReadLibDispatchImpls(t *testing.T) {
 	if !strings.HasSuffix(ops.DeclFile, "include/dispatch.h") {
 		t.Errorf("ops.DeclFile = %q, want *include/dispatch.h", ops.DeclFile)
 	}
-	if ops.DeclLine != 4 {
-		t.Errorf("ops.DeclLine = %d, want 4", ops.DeclLine)
+	if ops.DeclLine != 15 {
+		t.Errorf("ops.DeclLine = %d, want 15", ops.DeclLine)
+	}
+	if ops.Kind != "struct" {
+		t.Errorf("ops.Kind = %q, want struct", ops.Kind)
+	}
+	// Field offsets are what identify which slot of a dispatch table a
+	// call goes through — the fact GCC's .devirt dump carried before v9.
+	wantFields := []struct {
+		name   string
+		offset int
+	}{{"add", 0}, {"mul", 8}, {"name", 16}, {"last_status", 24}}
+	if len(ops.Fields) != len(wantFields) {
+		t.Fatalf("ops.Fields = %d, want %d: %+v", len(ops.Fields), len(wantFields), ops.Fields)
+	}
+	for i, w := range wantFields {
+		if ops.Fields[i].Name != w.name || ops.Fields[i].ByteOffset != w.offset {
+			t.Errorf("field %d = %s@%d, want %s@%d",
+				i, ops.Fields[i].Name, ops.Fields[i].ByteOffset, w.name, w.offset)
+		}
+	}
+
+	// The enum plane: DW_TAG_enumeration_type with its enumerators, and
+	// the typedef over it. Both reach DWARF purely because struct ops has
+	// a member of that type — nothing in this TU names them otherwise.
+	var st *dwarfingest.EnumInfo
+	for i := range info.Enums {
+		if info.Enums[i].Name == "op_status" {
+			st = &info.Enums[i]
+		}
+	}
+	if st == nil {
+		t.Fatalf("missing enum op_status; got %+v", info.Enums)
+	}
+	wantConsts := map[string]int64{"OP_STATUS_OK": 0, "OP_STATUS_OVERFLOW": 7, "OP_STATUS_UNSUPPORTED": 9}
+	if len(st.Constants) != len(wantConsts) {
+		t.Errorf("op_status constants = %d, want %d: %+v", len(st.Constants), len(wantConsts), st.Constants)
+	}
+	for _, c := range st.Constants {
+		want, ok := wantConsts[c.Name]
+		if !ok {
+			t.Errorf("unexpected enumerator %q", c.Name)
+			continue
+		}
+		if c.Value != want {
+			t.Errorf("%s = %d, want %d", c.Name, c.Value, want)
+		}
+	}
+
+	var td *dwarfingest.TypedefInfo
+	for i := range info.Typedefs {
+		if info.Typedefs[i].Name == "op_status_t" {
+			td = &info.Typedefs[i]
+		}
+	}
+	if td == nil {
+		t.Fatalf("missing typedef op_status_t; got %+v", info.Typedefs)
+	}
+	if td.Target != "enum op_status" {
+		t.Errorf("op_status_t target = %q, want \"enum op_status\"", td.Target)
 	}
 
 	// g_ops variable at CU scope.

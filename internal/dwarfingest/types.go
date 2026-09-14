@@ -24,6 +24,7 @@ type Info struct {
 	InlineInstances []InlineInstance
 	Structs         []StructInfo
 	Typedefs        []TypedefInfo
+	Enums           []EnumInfo
 	Variables       []VariableInfo
 }
 
@@ -108,20 +109,31 @@ type InlineInstance struct {
 	Column           int
 }
 
-// StructInfo is one DW_TAG_structure_type DIE. Anonymous structs get
-// an empty Name — ingest disambiguates with the __anon_line_col USR.
+// StructInfo is one DW_TAG_structure_type or DW_TAG_union_type DIE.
+// Anonymous records get an empty Name — ingest disambiguates with the
+// __anon_line_col USR from the appendix.
 type StructInfo struct {
-	Name     string
-	DeclFile string
-	DeclLine int
-	Fields   []FieldInfo
+	Name       string
+	Kind       string // "struct" | "union"
+	DeclFile   string
+	DeclLine   int
+	DeclColumn int
+	ByteSize   int // DW_AT_byte_size; 0 when the type is incomplete here
+	Fields     []FieldInfo
 }
 
 // FieldInfo is one DW_TAG_member DIE. Type is a rendered string
 // (e.g., "int (*)(int, int)" for a fn-pointer field).
+//
+// ByteOffset is DW_AT_data_member_location — the same fact GCC's
+// .devirt dump reported as "Type:const struct ops, offset 8l" before
+// that plane was removed in schema v9, except DWARF carries it for
+// every record rather than only for statically-initialized function
+// pointers. Union members have no location attribute and report 0.
 type FieldInfo struct {
-	Name string
-	Type string
+	Name       string
+	Type       string
+	ByteOffset int
 }
 
 // TypedefInfo is one DW_TAG_typedef DIE.
@@ -130,6 +142,27 @@ type TypedefInfo struct {
 	DeclFile string
 	DeclLine int
 	Target   string // rendered underlying type
+}
+
+// EnumInfo is one DW_TAG_enumeration_type DIE with its enumerators.
+// An enum used only through a typedef still gets its own DIE, so the
+// tag and the typedef are separate rows joined by nothing but the
+// typedef's rendered Target.
+type EnumInfo struct {
+	Name       string // "" when anonymous
+	DeclFile   string
+	DeclLine   int
+	DeclColumn int
+	ByteSize   int
+	Constants  []EnumConstant
+}
+
+// EnumConstant is one DW_TAG_enumerator DIE. Value is what the compiler
+// assigned, which is the reason to index it: source text gives the name,
+// DWARF gives the number.
+type EnumConstant struct {
+	Name  string
+	Value int64
 }
 
 // VariableInfo is one CU-scope DW_TAG_variable DIE.

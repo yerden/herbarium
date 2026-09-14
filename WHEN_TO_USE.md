@@ -43,6 +43,19 @@ Tools: `list_indirect_call_sites`, `resolve_indirect_call`, `list_address_taken_
 
 Grep finds the address-take but not the resolution set.
 
+### Types and constants
+- "Where is this typedef declared, and what does it alias?"
+- "What value does this enum constant actually have?"
+- "What are the fields of this struct, and at what offsets?"
+
+Tools: `find_type`, `describe_type`.
+
+These come from DWARF, so they describe types the compiler *emitted*: a
+type no translation unit uses has no row, and an empty result means "unused
+here", not "does not exist". Macros are not in this plane at all — they
+leave no DWARF at the `-g` level herbarium requires, so `search_source` is
+the only route to one.
+
 ### Compiler decisions
 - "Was this call inlined — by which pass, and if not, why not?"
 - "Where did this helper's body end up? It has no callers in the binary."

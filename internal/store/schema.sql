@@ -119,6 +119,61 @@ CREATE TABLE symbol_definitions (
 CREATE INDEX idx_sd_symbol ON symbol_definitions(symbol_id);
 CREATE INDEX idx_sd_file   ON symbol_definitions(file);
 
+-- Types that reached the assembler. Like `symbols`, this records what the
+-- compiler emitted, not what the source declares: DWARF describes only
+-- types some variable, parameter, member or signature actually uses, so a
+-- declared-but-unused typedef, struct or enum has no row here at any -g
+-- level (verified: -g and -g3 both omit it entirely). An empty find_type
+-- therefore means "no TU used this type", not "no such type" — the same
+-- reached-the-assembler property `symbols` has, for the same reason.
+--
+-- Identity is file-scoped for every kind, because C types have no linkage:
+-- one USR per (path, tag), so a struct in a header included by 50 TUs
+-- collapses to one row. See herbarium-plan.md Appendix: USR scheme.
+CREATE TABLE types (
+  id         INTEGER PRIMARY KEY,
+  usr        TEXT UNIQUE,    -- 'c:<path>@T@name' | '@S@' | '@U@' | '@E@'
+  name       TEXT,           -- '' when anonymous; the USR carries __anon_<line>_<col>
+  kind       TEXT,           -- 'typedef' | 'struct' | 'union' | 'enum' — closed
+  decl_file  TEXT,           -- project-relative
+  decl_line  INTEGER,
+  byte_size  INTEGER,        -- DW_AT_byte_size; NULL when incomplete here
+  underlying TEXT            -- typedef only: rendered target ('enum flw_action')
+);
+CREATE INDEX idx_types_name ON types(name);
+CREATE VIRTUAL TABLE types_fts USING fts5(
+  name, underlying,
+  content='types', content_rowid='id',
+  tokenize='unicode61 separators _'
+);
+
+-- DW_TAG_member. byte_offset is DW_AT_data_member_location — the fact
+-- GCC's .devirt dump reported as "Type:const struct ops, offset 8l"
+-- before that plane was removed in v9, except DWARF carries it for every
+-- record rather than only for statically-initialized dispatch tables.
+-- Union members have no location attribute and store 0.
+CREATE TABLE type_fields (
+  type_id     INTEGER REFERENCES types(id),
+  name        TEXT,
+  type        TEXT,          -- rendered, e.g. 'int (*)(int, int)'
+  ordinal     INTEGER,       -- declaration order within the record
+  byte_offset INTEGER
+);
+CREATE INDEX idx_tf_type ON type_fields(type_id);
+CREATE INDEX idx_tf_name ON type_fields(name);
+
+-- DW_TAG_enumerator. `value` is what the compiler assigned, which is the
+-- whole reason to index these: grepping the source finds the name, this
+-- finds the number.
+CREATE TABLE enum_constants (
+  usr     TEXT UNIQUE,       -- 'c:<path>@E@<enum>@<member>'
+  type_id INTEGER REFERENCES types(id),
+  name    TEXT,
+  value   INTEGER
+);
+CREATE INDEX idx_ec_name ON enum_constants(name);
+CREATE INDEX idx_ec_type ON enum_constants(type_id);
+
 -- Direct call edges, from two independent sources
 CREATE TABLE call_edges (
   caller_id INTEGER REFERENCES symbols(id),

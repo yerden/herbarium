@@ -248,6 +248,37 @@ CREATE TABLE symbol_definitions (
 CREATE INDEX idx_sd_symbol ON symbol_definitions(symbol_id);
 CREATE INDEX idx_sd_file ON symbol_definitions(file);
 
+-- Types the compiler emitted. DWARF records a type only where emitted code
+-- uses it, so a declared-but-unused typedef/struct/enum has no row at any -g
+-- level — the same reached-the-assembler property `symbols` has. Identity is
+-- file-scoped for every kind (C types have no linkage), so a header type
+-- included by N TUs collapses to one row. See Appendix: USR scheme § Types.
+CREATE TABLE types (
+  id INTEGER PRIMARY KEY,
+  usr TEXT UNIQUE,         -- 'c:<path>@T@name' | '@S@' | '@U@' | '@E@'
+  name TEXT,               -- '' when anonymous; USR carries __anon_<line>_<col>
+  kind TEXT,               -- 'typedef' | 'struct' | 'union' | 'enum'
+  decl_file TEXT,
+  decl_line INTEGER,
+  byte_size INTEGER,
+  underlying TEXT          -- typedef only: rendered target type
+);
+
+CREATE TABLE type_fields (
+  type_id INTEGER REFERENCES types(id),
+  name TEXT,
+  type TEXT,               -- rendered, e.g. 'int (*)(int, int)'
+  ordinal INTEGER,
+  byte_offset INTEGER      -- DW_AT_data_member_location
+);
+
+CREATE TABLE enum_constants (
+  usr TEXT UNIQUE,         -- 'c:<path>@E@<enum>@<member>'
+  type_id INTEGER REFERENCES types(id),
+  name TEXT,
+  value INTEGER            -- the value the compiler assigned
+);
+
 -- Direct call edges, from two independent sources
 CREATE TABLE call_edges (
   caller_id INTEGER REFERENCES symbols(id),
@@ -430,6 +461,14 @@ The verdict is decided from the full row set even when the echoed evidence is ca
 **`resolve_indirect_call(site_id)`** — type-compatibility narrowing (address-taken functions whose `symbols.signature` matches the site's `callee_type`), falling back to the full address-taken pool when DWARF left no type. Each candidate is tagged by evidence source.
 *Benefit:* the closest available answer to "what could this indirect call be calling," using only what the compiler already knows. These stay *candidates*: no plane in the index names the actual callee of an indirect call.
 
+### Types
+
+**`find_type(query, exact?, kind?, limit?)`** — typedefs, struct/union/enum tags and individual enum constants in one search, because an agent looking for an identifier does not know in advance which of those it is.
+*Benefit:* the plane that answers "where is this type declared, and what is this constant's value" without dropping to grep.
+
+**`describe_type(usr)`** — one type in full: fields in declaration order with rendered types and byte offsets, or enumerators with their values, or a typedef's underlying type.
+*Benefit:* field byte offsets identify which slot of a dispatch table a call goes through — compiler truth for the question `resolve_indirect_call` can only answer with candidates.
+
 ### Linkage and weak symbols
 
 **`describe_link_resolution(usr, target)`** — which object won, which lost, which archive it came from, linkage kind.
@@ -508,6 +547,7 @@ This is not incremental re-ingest (Phase 7, deferred): step 2 is a full rebuild,
 - `internal/gccdump/optrecord.go` — parse `<obj>.opt-record.json.gz` (`-fsave-optimization-record`). Keeps the records whose pass carries the `inline` optgroup — the same selector `-fopt-info-inline` uses — so the vectorizer records in the same file are dropped without naming them. The two node references in a message are ordered by the message's own wording (`Inlined <callee> into <caller>` vs `not inlinable: <caller> -> <callee>`), so the parser reads the separator rather than assuming a position, and drops any record matching neither: a reversed inline edge would be worse than a missing one.
 - `internal/gccdump/icf.go` — parse `-fdump-ipa-icf` for folded groups (returns empty on fixtures without folding; Phase 8's fixture forces ICF to fire).
 - `internal/usr/` — USR synthesis per the appendix. Handles GCC clone suffixes (`.constprop.N`, `.isra.N`) by aliasing to the parent's USR and recording the linkage name on the parent.
+- `internal/dwarfingest/` also owns the type plane: `DW_TAG_typedef`, `_structure_type`, `_union_type`, `_enumeration_type` with `_member`/`_enumerator` children. No new build flag — all of it is present at the `-g` the prerequisites already require.
 - `internal/ingest/` orchestrator: two-phase per-TU aggregation (non-clones first, then clones), cross-TU merge, edge resolution via per-TU local-id → USR maps, cross-TU edge dedup (multi-executable `main` collapses to one identity — see Appendix: Symbols and definitions).
 - Populate `symbols`, `symbol_definitions` (identity + per-def location), `call_edges (source='compiler_cgraph')`, `inline_decisions`, `inline_records`. The optimization record joins by cgraph node order — the same local ids `.cgraph` uses — which is what lets a clone (`use_dispatch.constprop/12`) resolve to its parent's USR; a name lookup could not. `indirect_call_sites` is populated in Phase 3 (DWARF adds file/line/column that `.cgraph` lacks).
 

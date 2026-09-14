@@ -18,6 +18,7 @@
 //   callgraph_runtime_tools.go list_linked_callers, list_linked_callees,
 //                              describe_inlining, list_inline_instances,
 //                              explain_call
+//   type_tools.go              find_type, describe_type
 //   indirect_tools.go          list_indirect_call_sites,
 //                              list_address_taken_functions,
 //                              resolve_indirect_call
@@ -107,6 +108,7 @@ func New(db *sql.DB, opts Options) *Server {
 	s.registerSymbolTools()
 	s.registerCallGraphSourceTools()
 	s.registerCallGraphRuntimeTools()
+	s.registerTypeTools()
 	s.registerIndirectTools()
 	s.registerLinkageTools()
 	s.registerReloadTool()

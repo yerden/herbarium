@@ -191,7 +191,7 @@ func emptyFindNote(query, target string, exact bool) string {
 	} else {
 		b.WriteString("No symbol name or signature matched. ")
 	}
-	b.WriteString("This index holds functions and variables only, so a type, macro or enum constant never has a hit here regardless of query — find those in the source plane with search_source.")
+	b.WriteString("This index holds functions and variables only, so a type or enum constant never has a hit here regardless of query — use find_type for those. A macro has no row in any plane; search_source is the only route to one.")
 	if target != "" {
 		b.WriteString(" The target filter also excludes internal-linkage symbols, which get no link_resolutions row even when their code is in the binary; re-run without target before concluding absence.")
 	}

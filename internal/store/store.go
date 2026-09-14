@@ -88,7 +88,20 @@ import (
 // and parses. Dropping it also removes -fdump-ipa-devirt from the
 // required c_args, so a v9 collect needs one flag fewer than v8 and GCC
 // writes one dump fewer per TU.
-const SchemaVersion = "9"
+// v9 -> v10: adds the type plane — types, type_fields, enum_constants
+// and types_fts. All three come from DWARF the reader was already
+// walking: dwarfingest populated Structs and Typedefs for several
+// versions and ingest discarded both. Enumerators are the only new
+// extraction, and they need no new build flag — DW_TAG_enumerator with
+// DW_AT_const_value is present at plain -g, which preflight already
+// requires. The USR forms were specified in the plan's appendix from the
+// start and internal/usr has implemented them, uncalled, since then.
+//
+// A v9 index answers "where is this typedef" with nothing, and so does a
+// v10 index for a type no TU uses -- DWARF omits unused types at every -g
+// level. The difference the bump marks is that v10 can distinguish the
+// two, and v9 could not tell the caller which it was looking at.
+const SchemaVersion = "10"
 
 //go:embed schema.sql
 var schemaSQL string

@@ -83,6 +83,13 @@ func Read(path string) (*Info, error) {
 			// terminating Tag=0 — do NOT push a frame.
 			continue
 
+		case dwarf.TagEnumerationType:
+			en := parseEnum(e, curCUFiles, r)
+			info.Enums = append(info.Enums, en)
+			// parseEnum consumed the enumerator children and their
+			// terminating Tag=0, same contract as parseStruct.
+			continue
+
 		case dwarf.TagTypedef:
 			t := parseTypedef(e, curCUFiles, tc)
 			if t.Name != "" {
@@ -317,15 +324,24 @@ func resolveLine(lr *dwarf.LineReader, pc uint64, cs *CallSite, files []*dwarf.L
 }
 
 func parseStruct(e *dwarf.Entry, files []*dwarf.LineFile, r *dwarf.Reader, tc *typeCache) StructInfo {
-	s := StructInfo{}
+	s := StructInfo{Kind: "struct"}
+	if e.Tag == dwarf.TagUnionType {
+		s.Kind = "union"
+	}
 	if n, ok := e.Val(dwarf.AttrName).(string); ok {
 		s.Name = n
+	}
+	if bs, ok := e.Val(dwarf.AttrByteSize).(int64); ok {
+		s.ByteSize = int(bs)
 	}
 	if idx, ok := e.Val(dwarf.AttrDeclFile).(int64); ok {
 		s.DeclFile = fileFromIdx(files, int(idx))
 	}
 	if ln, ok := e.Val(dwarf.AttrDeclLine).(int64); ok {
 		s.DeclLine = int(ln)
+	}
+	if c, ok := e.Val(dwarf.AttrDeclColumn).(int64); ok {
+		s.DeclColumn = int(c)
 	}
 	if !e.Children {
 		return s
@@ -341,13 +357,66 @@ func parseStruct(e *dwarf.Entry, files []*dwarf.LineFile, r *dwarf.Reader, tc *t
 			if off, ok := c.Val(dwarf.AttrType).(dwarf.Offset); ok {
 				typ = tc.render(off)
 			}
-			s.Fields = append(s.Fields, FieldInfo{Name: name, Type: typ})
+			// Absent on a union member — every member starts at 0
+			// there, which is what the zero value says.
+			off, _ := c.Val(dwarf.AttrDataMemberLoc).(int64)
+			s.Fields = append(s.Fields, FieldInfo{Name: name, Type: typ, ByteOffset: int(off)})
 		}
 		if c.Children {
 			r.SkipChildren()
 		}
 	}
 	return s
+}
+
+// parseEnum reads one DW_TAG_enumeration_type and its enumerators. Like
+// parseStruct it advances r past the children and their terminating
+// Tag=0 entry, so the caller must not push a stack frame for it.
+func parseEnum(e *dwarf.Entry, files []*dwarf.LineFile, r *dwarf.Reader) EnumInfo {
+	en := EnumInfo{}
+	if n, ok := e.Val(dwarf.AttrName).(string); ok {
+		en.Name = n
+	}
+	if idx, ok := e.Val(dwarf.AttrDeclFile).(int64); ok {
+		en.DeclFile = fileFromIdx(files, int(idx))
+	}
+	if ln, ok := e.Val(dwarf.AttrDeclLine).(int64); ok {
+		en.DeclLine = int(ln)
+	}
+	if c, ok := e.Val(dwarf.AttrDeclColumn).(int64); ok {
+		en.DeclColumn = int(c)
+	}
+	if bs, ok := e.Val(dwarf.AttrByteSize).(int64); ok {
+		en.ByteSize = int(bs)
+	}
+	if !e.Children {
+		return en
+	}
+	for {
+		c, err := r.Next()
+		if err != nil || c == nil || c.Tag == 0 {
+			break
+		}
+		if c.Tag == dwarf.TagEnumerator {
+			name, _ := c.Val(dwarf.AttrName).(string)
+			// DW_AT_const_value is int64 for every C enum GCC emits,
+			// but the DWARF reader types small values narrowly.
+			var val int64
+			switch v := c.Val(dwarf.AttrConstValue).(type) {
+			case int64:
+				val = v
+			case int:
+				val = int64(v)
+			}
+			if name != "" {
+				en.Constants = append(en.Constants, EnumConstant{Name: name, Value: val})
+			}
+		}
+		if c.Children {
+			r.SkipChildren()
+		}
+	}
+	return en
 }
 
 func parseTypedef(e *dwarf.Entry, files []*dwarf.LineFile, tc *typeCache) TypedefInfo {

@@ -10,7 +10,7 @@ It exists so that "herbarium doesn't know X" can be checked against the
 schema before anyone reaches for a new column. Regenerate it from the
 code when the schema moves — do not hand-patch it.
 
-17 tables, 1 view, 1 FTS index.
+20 tables, 1 view, 2 FTS indexes.
 
 Provenance abbreviations used below:
 
@@ -78,9 +78,10 @@ Nothing writes it. The five keys above are the complete set.
 
 All four share `blobs`, so byte-identical content dedups across them.
 
-This plane is the **only** place types, macros and enum constants exist.
-They are text here and nothing anywhere else — no symbol row, no USR, no
-kind. A search for one belongs in `search_source`, never `find_symbol`.
+This plane is the only place **macros** exist. A macro leaves no DWARF at
+the `-g` level herbarium requires (`.debug_macro` needs `-g3`), so it is
+text here and nothing anywhere else — `search_source` is the only route to
+one. Types and enum constants *do* have rows as of v10; see § 3b.
 
 ## 3. Symbol plane
 
@@ -115,6 +116,42 @@ Two structural facts that bite:
   purely by an edge reference. The fixture's `use_dispatch` is exactly
   this. Any query routing symbol → file through `symbol_definitions`
   silently drops those symbols.
+
+## 3b. Type plane
+
+| Table | A row is | Written by | From |
+|---|---|---|---|
+| `types` | one type the compiler emitted — `typedef` \| `struct` \| `union` \| `enum` | `ingest.DWARF` | `DW_TAG_typedef` / `_structure_type` / `_union_type` / `_enumeration_type`; `byte_size` from `DW_AT_byte_size`, `underlying` is the typedef's rendered target |
+| `types_fts` | FTS5 shadow over `name` + `underlying` | rebuilt at the end of `ingest.DWARF` | contentless mode over `types` |
+| `type_fields` | one member, in declaration order | `ingest.DWARF` | `DW_TAG_member`; `byte_offset` from `DW_AT_data_member_location` |
+| `enum_constants` | one enumerator with the value the compiler assigned | `ingest.DWARF` | `DW_TAG_enumerator` + `DW_AT_const_value` |
+
+Identity is **file-scoped for every kind** — C types have no linkage — so
+`struct ops` in a header included by 50 TUs is one row, not 50. Anonymous
+records are keyed `__anon_<line>_<column>` per the plan's appendix.
+
+Two limits, both deliberate:
+
+- **Used types only.** DWARF records a type where emitted code uses it and
+  nowhere else. A file declaring an unused typedef, enum and struct
+  produces DWARF naming none of them — verified at `-g` *and* `-g3`. So an
+  empty `find_type` means "no TU used this type", never "no such type":
+  the same reached-the-assembler property `symbols` has, for the same
+  reason, and stated on both tools.
+- **Project types only.** A type whose `decl_file` falls outside
+  `--project-root` is skipped, mirroring the appendix's rule for
+  out-of-root sources. Without it every TU's `size_t` and `FILE` would
+  bury the project's own types.
+
+`type_fields.byte_offset` deserves a note: it is the fact GCC's `.devirt`
+dump carried as `Type:const struct ops, offset 8l` before that plane was
+removed in v9 — except DWARF has it for every record, not only for
+statically-initialized dispatch tables. `describe_type` on the fixture's
+`struct ops` returns `add@0, mul@8, name@16, last_status@24`.
+
+Fields have no USR. `usr.Field` defines the form (`…@S@<struct>@F@<field>`)
+for a future `stored_in:T.f` plane; nothing stores one yet, and fields are
+addressed by `(type_id, name)`.
 
 ## 4. Call plane
 

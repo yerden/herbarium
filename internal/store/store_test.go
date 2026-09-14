@@ -27,6 +27,7 @@ func TestInitAndReopen(t *testing.T) {
 		"blobs", "sources",
 		"symbols", "symbols_fts", "symbol_definitions",
 		"call_edges", "indirect_call_sites",
+		"types", "type_fields", "enum_constants",
 		"inline_decisions", "link_resolutions", "symbol_reachability",
 		"external_sources", "generated_sources",
 	}

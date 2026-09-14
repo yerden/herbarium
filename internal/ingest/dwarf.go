@@ -77,6 +77,36 @@ func DWARF(db *sql.DB, bd *builddir.BuildDir, pr *PathResolver, idByUSR map[stri
 	}
 	defer indirectStmt.Close()
 
+	// ON CONFLICT DO NOTHING is the dedup: a type declared in a header
+	// has one file-scoped USR and one identical DIE in every TU that
+	// included it, so the first object to mention it wins. Objects are
+	// walked in sorted order, so "first" is deterministic.
+	typeStmt, err := tx.Prepare(`
+		INSERT INTO types (usr, name, kind, decl_file, decl_line, byte_size, underlying)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(usr) DO NOTHING`)
+	if err != nil {
+		return DwarfSummary{}, fmt.Errorf("ingest/dwarf: prepare types insert: %w", err)
+	}
+	defer typeStmt.Close()
+
+	fieldStmt, err := tx.Prepare(`
+		INSERT INTO type_fields (type_id, name, type, ordinal, byte_offset)
+		VALUES (?, ?, ?, ?, ?)`)
+	if err != nil {
+		return DwarfSummary{}, fmt.Errorf("ingest/dwarf: prepare type_fields insert: %w", err)
+	}
+	defer fieldStmt.Close()
+
+	enumConstStmt, err := tx.Prepare(`
+		INSERT INTO enum_constants (usr, type_id, name, value)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(usr) DO NOTHING`)
+	if err != nil {
+		return DwarfSummary{}, fmt.Errorf("ingest/dwarf: prepare enum_constants insert: %w", err)
+	}
+	defer enumConstStmt.Close()
+
 	inlineStmt, err := tx.Prepare(`
 		INSERT INTO inline_instances
 		  (callee_id, caller_id, parent_callee_id, depth, file, line, column, object)
@@ -186,6 +216,93 @@ func DWARF(db *sql.DB, bd *builddir.BuildDir, pr *PathResolver, idByUSR map[stri
 			}
 			sum.InlineInstances++
 		}
+
+		// Types. Declared-but-unused types are absent from DWARF at every
+		// -g level, so this plane is "types the compiler emitted", with
+		// the same reached-the-assembler caveat `symbols` carries.
+		insertType := func(name, kind, declFile string, line, col, byteSize int, underlying string) (int64, bool, error) {
+			// A type declared outside --project-root is a system or
+			// vendored header's — indexing those would bury the project's
+			// own types under libc's. Mirrors the appendix's rule that
+			// out-of-root sources are not given USRs.
+			rp := pr.ToProjectRelative(declFile)
+			if declFile == "" || !rp.InProject {
+				return 0, false, nil
+			}
+			var u string
+			switch kind {
+			case "typedef":
+				if name == "" {
+					return 0, false, nil
+				}
+				u = usr.Typedef(rp.Rel, name)
+			case "struct":
+				u = usr.Struct(rp.Rel, name, line, col)
+			case "union":
+				u = usr.Union(rp.Rel, name, line, col)
+			case "enum":
+				u = usr.Enum(rp.Rel, name, line, col)
+			}
+			var sizeArg any
+			if byteSize > 0 {
+				sizeArg = byteSize
+			}
+			res, err := typeStmt.Exec(u, name, kind, rp.Rel, line, sizeArg, underlying)
+			if err != nil {
+				return 0, false, fmt.Errorf("ingest/dwarf: types insert %s: %w", u, err)
+			}
+			// RowsAffected 0 means another TU already contributed this
+			// type; its children are already in, so the caller skips them.
+			if n, _ := res.RowsAffected(); n == 0 {
+				return 0, false, nil
+			}
+			id, err := res.LastInsertId()
+			if err != nil {
+				return 0, false, fmt.Errorf("ingest/dwarf: types id %s: %w", u, err)
+			}
+			sum.Types++
+			return id, true, nil
+		}
+
+		for _, st := range info.Structs {
+			id, fresh, err := insertType(st.Name, st.Kind, st.DeclFile, st.DeclLine, st.DeclColumn, st.ByteSize, "")
+			if err != nil {
+				return DwarfSummary{}, err
+			}
+			if !fresh {
+				continue
+			}
+			for i, f := range st.Fields {
+				if _, err := fieldStmt.Exec(id, f.Name, f.Type, i, f.ByteOffset); err != nil {
+					return DwarfSummary{}, fmt.Errorf("ingest/dwarf: type_fields insert: %w", err)
+				}
+				sum.TypeFields++
+			}
+		}
+
+		for _, td := range info.Typedefs {
+			if _, _, err := insertType(td.Name, "typedef", td.DeclFile, td.DeclLine, 0, 0, td.Target); err != nil {
+				return DwarfSummary{}, err
+			}
+		}
+
+		for _, en := range info.Enums {
+			id, fresh, err := insertType(en.Name, "enum", en.DeclFile, en.DeclLine, en.DeclColumn, en.ByteSize, "")
+			if err != nil {
+				return DwarfSummary{}, err
+			}
+			if !fresh {
+				continue
+			}
+			rp := pr.ToProjectRelative(en.DeclFile)
+			for _, c := range en.Constants {
+				cu := usr.EnumMember(rp.Rel, en.Name, en.DeclLine, en.DeclColumn, c.Name)
+				if _, err := enumConstStmt.Exec(cu, id, c.Name, c.Value); err != nil {
+					return DwarfSummary{}, fmt.Errorf("ingest/dwarf: enum_constants insert: %w", err)
+				}
+				sum.EnumConstants++
+			}
+		}
 	}
 
 	// Rebuild the FTS index once after all signature updates. FTS5
@@ -195,6 +312,11 @@ func DWARF(db *sql.DB, bd *builddir.BuildDir, pr *PathResolver, idByUSR map[stri
 		`INSERT INTO symbols_fts(symbols_fts) VALUES ('rebuild')`,
 	); err != nil {
 		return DwarfSummary{}, fmt.Errorf("ingest/dwarf: fts rebuild: %w", err)
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO types_fts(types_fts) VALUES ('rebuild')`,
+	); err != nil {
+		return DwarfSummary{}, fmt.Errorf("ingest/dwarf: types fts rebuild: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -211,6 +333,9 @@ type DwarfSummary struct {
 	DefLocations    int
 	IndirectSites   int
 	InlineInstances int
+	Types           int
+	TypeFields      int
+	EnumConstants   int
 }
 
 // resolveSymbolID tries the external USR form first, then the static

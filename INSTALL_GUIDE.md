@@ -174,7 +174,7 @@ herbarium preflight failed for builddir
 herbarium serve --hbr myproject.hbr --check
 ```
 
-Opens the `.hbr` read-only, registers all 29 tools, prints
+Opens the `.hbr` read-only, registers all 31 tools, prints
 `herbarium serve --check: … opens (schema N)`, and exits. This catches a schema
 mismatch between binary and artifact before opencode sees a transport that dies
 on startup.
