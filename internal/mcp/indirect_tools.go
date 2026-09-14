@@ -33,8 +33,7 @@ func (s *Server) registerIndirectTools() {
 			mcp.Description("USR of the enclosing function (from find_symbol.hits[].usr or describe_symbol.usr). Omit for all sites.")),
 		mcp.WithString("callee_type",
 			mcp.Description("Filter by callee signature, e.g. 'int (int, int)'. Same form as describe_symbol.signature, so a value from either tool matches here.")),
-		mcp.WithString("target",
-			mcp.Description("Restrict to sites whose caller is reachable in this target.")),
+		targetReachabilityArg("sites whose caller is"),
 		limitArg(indirectSitesLimit),
 		snippetArg(),
 	), s.handleListIndirectCallSites)
@@ -47,8 +46,7 @@ func (s *Server) registerIndirectTools() {
 		),
 		mcp.WithString("fn_ptr_type",
 			mcp.Description("Filter by function signature (as returned by describe_symbol.signature).")),
-		mcp.WithString("target",
-			mcp.Description("Restrict to functions reachable in this target.")),
+		targetReachabilityArg("functions"),
 	), s.handleListAddressTakenFunctions)
 
 	s.mcp.AddTool(newTool("resolve_indirect_call",

@@ -32,8 +32,7 @@ func (s *Server) registerCallGraphSourceTools() {
 		),
 		mcp.WithString("callee_usr", mcp.Required(),
 			mcp.Description("USR of the callee (from find_symbol.hits[].usr or describe_symbol.usr).")),
-		mcp.WithString("target",
-			mcp.Description("Restrict to callers reachable in this target.")),
+		targetReachabilityArg("callers"),
 	), s.handleListCallers)
 
 	s.mcp.AddTool(newTool("list_callees",
@@ -44,8 +43,7 @@ func (s *Server) registerCallGraphSourceTools() {
 		),
 		mcp.WithString("caller_usr", mcp.Required(),
 			mcp.Description("USR of the caller (from find_symbol.hits[].usr or describe_symbol.usr).")),
-		mcp.WithString("target",
-			mcp.Description("Restrict to callees reachable in this target.")),
+		targetReachabilityArg("callees"),
 	), s.handleListCallees)
 
 	s.mcp.AddTool(newTool("list_call_paths",
@@ -64,8 +62,7 @@ func (s *Server) registerCallGraphSourceTools() {
 			mcp.Description("Maximum path length (edges). Default 6, max 16."),
 			mcp.Min(1),
 			mcp.Max(float64(callPathMaxDepth))),
-		mcp.WithString("target",
-			mcp.Description("Restrict to paths whose every node is reachable in this target.")),
+		targetReachabilityArg("paths whose every node is"),
 	), s.handleListCallPaths)
 }
 

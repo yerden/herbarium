@@ -63,6 +63,31 @@ func snippetArg() mcp.ToolOption {
 		mcp.Description("Attach a ±5-line source window to each location. Off by default: it roughly doubles the payload, and read_source fetches context for the one location you care about."))
 }
 
+// targetReachabilityArg declares the `target` filter for tools that scope
+// by symbol_reachability, and says what that filter silently costs.
+//
+// The view is derived from link_resolutions, which is keyed by the names
+// the linker actually saw — so an internal-linkage symbol (a `static`, a
+// `static inline` in a header) has no row and is dropped, even though its
+// code is in the binary. That is not a bug to be fixed at the query: no
+// table in this schema maps an internal-linkage symbol, or an object
+// file, to a target (see SCHEMA.md § 7). Disclosure is the only remedy,
+// so the wording lives here rather than being retyped per tool.
+//
+// `subject` names what gets dropped in this tool's terms — "callers",
+// "call sites", and so on.
+func targetReachabilityArg(subject string) mcp.ToolOption {
+	return mcp.WithString("target", mcp.Description(
+		"Restrict to "+subject+" reachable in this target (symbol_reachability join). "+
+			"Internal-linkage symbols — a 'static' function, a 'static inline' in a header — "+
+			"never reach link_resolutions and so are dropped by this filter even when their "+
+			"code is in the binary. C dispatch tables and hot-path helpers are usually static, "+
+			"so a target-scoped result can be missing exactly what you are looking for, with "+
+			"nothing marking the loss. Treat a smaller or empty result as 'nothing resolved "+
+			"under that name', never as 'no such code'; re-run without 'target' to see the "+
+			"full set."))
+}
+
 // Snippet is the ±snippetContext window returned inside a Location.
 type Snippet struct {
 	StartLine int    `json:"start_line"`

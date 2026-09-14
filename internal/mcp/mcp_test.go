@@ -300,3 +300,68 @@ func enumHas(enums []herbmcp.SchemaEnum, col, val string) bool {
 	}
 	return false
 }
+
+// Every `target` argument must say which plane it filters on, because an
+// empty or short result looks identical to absence on all of them. Three
+// planes are in play and each drops something different:
+//
+//   - symbol_reachability — derived from link_resolutions, so internal
+//     linkage is absent and a static caller or call site silently
+//     disappears (list_callees on the fixture's main: 6 without target,
+//     4 with). See SCHEMA.md § 7: no table maps a static to a target, so
+//     this cannot be fixed at the query and disclosure is the remedy.
+//   - target_sources — TUs meson compiles into the target, so an archive's
+//     sources answer under the library target, not the executable's.
+//   - call_edges.target_id — genuinely per-target, nothing is dropped.
+//
+// A new tool with a `target` argument must either use one of the shared
+// helpers or be listed here as a deliberate exemption.
+func TestTargetArgsDiscloseTheirPlane(t *testing.T) {
+	// Tools whose subject IS the link plane: excluding internal linkage
+	// is the correct answer there, not a silent loss. And the runtime
+	// callgraph tools filter on call_edges.target_id, which drops nothing.
+	exempt := map[string]string{
+		"describe_link_resolution": "link plane is the subject",
+		"list_undefined_symbols":   "link plane is the subject",
+		"list_entry_points":        "link plane is the subject",
+		"list_icf_groups":          "wording already names link_resolutions",
+		"list_unreachable_symbols": "carries its own caveat in the tool description",
+		"list_weak_symbols":        "a weak symbol is external by definition, so nothing is dropped",
+		"find_symbol":              "carries its own link_resolutions caveat",
+		"list_linked_callers":      "call_edges.target_id, not a reachability join",
+		"list_linked_callees":      "call_edges.target_id, not a reachability join",
+		"explain_call":             "call_edges.target_id, not a reachability join",
+	}
+
+	client := startClient(t, fixtureHBR(t))
+	list, err := client.ListTools(context.Background(), mcp.ListToolsRequest{})
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	var checked int
+	for _, tool := range list.Tools {
+		props := tool.InputSchema.Properties
+		raw, ok := props["target"]
+		if !ok {
+			continue
+		}
+		if why, ok := exempt[tool.Name]; ok {
+			t.Logf("%s: exempt (%s)", tool.Name, why)
+			continue
+		}
+		desc, _ := raw.(map[string]any)["description"].(string)
+		switch {
+		case strings.Contains(desc, "Internal-linkage symbols"):
+		case strings.Contains(desc, "target_sources join"):
+		default:
+			t.Errorf("%s: `target` description names no plane and no caveat — "+
+				"use targetReachabilityArg or targetSourcesArg, or add a deliberate "+
+				"exemption above. Got: %q", tool.Name, desc)
+		}
+		checked++
+	}
+	if checked == 0 {
+		t.Fatal("no target arguments checked — introspection broke, not a clean bill of health")
+	}
+	t.Logf("%d target arguments carry a plane caveat", checked)
+}
