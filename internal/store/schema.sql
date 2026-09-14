@@ -62,11 +62,17 @@ CREATE TABLE generated_sources (
 -- symbol_definitions — a symbol may have multiple defs across TUs
 -- (weak/strong overrides, multi-executable `main`, static-inline in
 -- headers). See herbarium-plan.md § Symbols and definitions.
+--
+-- `kind` holds only 'function' or 'variable': it is the first token of
+-- GCC cgraph's `Type:` line, and the cgraph describes what reached the
+-- assembler, so a type has no row here. Types, macros and enum
+-- constants are not in this index at all — they are reachable only
+-- through the source plane (search_source / read_source).
 CREATE TABLE symbols (
   id            INTEGER PRIMARY KEY,
   usr           TEXT UNIQUE,    -- 'c:@F@name' (external) | 'c:<path>@F@name' (static)
   name          TEXT,
-  kind          TEXT,           -- 'function' | 'variable' | 'typedef' | ...
+  kind          TEXT,           -- 'function' | 'variable' — closed, see below
   linkage       TEXT,           -- 'external' | 'internal' | 'weak' | 'common' (aggregated)
   signature     TEXT,           -- reconstructed from DWARF (Phase 3)
   address_taken INTEGER,        -- 0/1 aggregated across all TUs where defined

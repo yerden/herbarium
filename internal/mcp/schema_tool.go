@@ -75,8 +75,8 @@ var SchemaEnums = []SchemaEnum{
 	},
 	{
 		Column: "symbols.kind",
-		Values: []string{"function", "variable", "typedef"},
-		Notes:  "Additional entity kinds (struct/union/enum tags, fields) may appear once a future walker phase populates them; see herbarium-plan.md Appendix.",
+		Values: []string{"function", "variable"},
+		Notes:  "Closed as listed. kind is the first token of GCC cgraph's `Type:` line and the cgraph describes only what reached the assembler, so types, macros and enum constants have no symbols row — searching for one returns an empty result that means 'not an entity this index holds', not 'absent from the code'. Find those with search_source. (herbarium-plan.md's Appendix reserves typedef/struct kinds for a future walker phase; nothing populates them today.)",
 	},
 	{
 		Column: "symbols.linkage",
@@ -113,14 +113,14 @@ var SchemaEnums = []SchemaEnum{
 // (see herbarium-plan.md § Invariant).
 var SchemaJoinRecipes = []SchemaJoin{
 	{
-		Purpose: "Resolve a name to a symbol row (identity), including link-time clones like foo.constprop.0",
+		Purpose: "Resolve a name to a symbol row (identity), including link-time clones like foo.constprop.0 — same lookup find_symbol exact=true performs",
 		SQL: `SELECT s.*
 FROM symbols s
 WHERE s.name = :name
-   OR json_each.value = :name
-     AND s.rowid IN (
-       SELECT rowid FROM symbols, json_each(symbols.linkage_names)
-     )`,
+   OR EXISTS (
+        SELECT 1 FROM json_each(s.linkage_names)
+        WHERE json_each.value = :name
+      )`,
 	},
 	{
 		Purpose: "All defs of a symbol (multi-def: multi-executable main, weak+strong hook, static-inline header)",

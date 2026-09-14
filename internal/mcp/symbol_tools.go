@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -18,15 +19,21 @@ const findSymbolLimit = 100
 func (s *Server) registerSymbolTools() {
 	s.mcp.AddTool(newTool("find_symbol",
 		mcp.WithDescription(
-			"Fuzzy FTS lookup over symbol names and signatures. Handles identifier-"+
-				"boundary tokenization (add_ints → 'add ints') and prefix matches. "+
-				"Scopeable by symbol kind or by target membership — but a target-"+
-				"scoped miss is not proof of absence; read the 'target' arg first.",
+			"Look up symbols by name or signature. Fuzzy FTS by default — "+
+				"identifier-boundary tokenization (add_ints → 'add ints') plus "+
+				"prefix matching; pass exact=true for a literal name lookup that "+
+				"also matches link-time clone names. Scopeable by symbol kind or "+
+				"by target membership — but a target-scoped miss is not proof of "+
+				"absence; read the 'target' arg first. This index holds functions "+
+				"and variables only: a type, macro or enum constant has no symbol "+
+				"row to find, so reach for search_source instead.",
 		),
 		mcp.WithString("query", mcp.Required(),
-			mcp.Description("Substring or partial identifier. Split on non-alphanumeric boundaries (so 'add_ints' tokenizes to 'add ints') and each token gets a trailing '*' for prefix matching — 'add' matches 'add_ints', 'adder', 'quick_add'. All-punctuation input matches nothing.")),
+			mcp.Description("Substring or partial identifier. Split on non-alphanumeric boundaries (so 'add_ints' tokenizes to 'add ints') and each token gets a trailing '*' for prefix matching — 'add' matches 'add_ints', 'adder', 'quick_add'. All-punctuation input matches nothing. With exact=true it is instead the literal name to match.")),
+		mcp.WithBoolean("exact",
+			mcp.Description("Match the name literally instead of by FTS: symbols.name = query, or any of the symbol's linkage_names (so 'use_dispatch.constprop.0' from objdump output resolves to its source symbol, which FTS cannot do — it indexes source names only). Use this to confirm a name exists rather than to discover one.")),
 		mcp.WithString("kind",
-			mcp.Description("Filter by symbols.kind. Common values: 'function', 'variable', 'typedef' — call describe_schema for the full enum.")),
+			mcp.Description("Filter by symbols.kind, which is a closed two-value enum: 'function' or 'variable'. Nothing else is ever stored — kind comes from GCC's cgraph, which describes what reached the assembler, so types, macros and enum constants have no row here at any kind.")),
 		mcp.WithString("target",
 			mcp.Description("Restrict to symbols the linker resolved into this target (link_resolutions join). Internal-linkage symbols — a 'static' function, a 'static inline' in a header — never get a link_resolutions row by design, so they are filtered out here even when their code is in the binary (inlined at every call site, or folded by IPA-ICF). An empty target-scoped result therefore means 'no symbol resolved under that name', NOT 'no such code in this target'. Re-run without 'target' and confirm with describe_symbol (per-target link_resolutions) or list_linked_callers before concluding absence.")),
 	), s.handleFindSymbol)
@@ -60,10 +67,15 @@ type SymbolHit struct {
 // FindSymbolResponse is what find_symbol returns.
 type FindSymbolResponse struct {
 	Query     string      `json:"query"`
-	FTSQuery  string      `json:"fts_query"`
+	Exact     bool        `json:"exact,omitempty"`
+	FTSQuery  string      `json:"fts_query,omitempty"` // empty in exact mode — no FTS ran
 	Hits      []SymbolHit `json:"hits"`
 	Total     int         `json:"total"`
 	Truncated bool        `json:"truncated"`
+	// Note is set only on an empty result, to say which kind of nothing
+	// this is. A zero-hit find_symbol is otherwise indistinguishable
+	// from "no such code", and agents have read it that way.
+	Note string `json:"note,omitempty"`
 }
 
 func (s *Server) handleFindSymbol(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -73,27 +85,48 @@ func (s *Server) handleFindSymbol(_ context.Context, req mcp.CallToolRequest) (*
 	}
 	kind := req.GetString("kind", "")
 	target := req.GetString("target", "")
+	exact := req.GetBool("exact", false)
 
-	fts := buildFTSQuery(query)
-	if fts == "" {
-		return jsonResult(FindSymbolResponse{Query: query})
-	}
-
-	// Two-stage query: FTS narrows candidate ids; the join returns the
-	// symbol row + linkage + signature. The target filter — when set —
-	// restricts to symbols the linker resolved into that target
-	// (link_resolutions rows), covering both defined-here and pulled-
-	// from-archive cases.
-	sqlText := `
+	var fts, sqlText string
+	var args []any
+	if exact {
+		// linkage_names carries every link-time name for the symbol,
+		// clone suffixes included; FTS indexes only symbols.name, so a
+		// name read out of objdump or a map file is unfindable without
+		// this arm.
+		sqlText = `
+		SELECT s.usr, s.name, s.kind, s.linkage, IFNULL(s.signature, '')
+		FROM symbols s
+		WHERE (s.name = ? OR EXISTS (
+			SELECT 1 FROM json_each(s.linkage_names)
+			WHERE json_each.value = ?
+		))`
+		args = []any{query, query}
+	} else {
+		fts = buildFTSQuery(query)
+		if fts == "" {
+			return jsonResult(FindSymbolResponse{
+				Query: query,
+				Note:  emptyFindNote(query, target, false),
+			})
+		}
+		// Two-stage query: FTS narrows candidate ids; the join returns
+		// the symbol row + linkage + signature.
+		sqlText = `
 		SELECT s.usr, s.name, s.kind, s.linkage, IFNULL(s.signature, '')
 		FROM symbols_fts f
 		JOIN symbols s ON s.id = f.rowid
 		WHERE symbols_fts MATCH ?`
-	args := []any{fts}
+		args = []any{fts}
+	}
 	if kind != "" {
 		sqlText += ` AND s.kind = ?`
 		args = append(args, kind)
 	}
+	// Both arms leave sqlText ending in a WHERE predicate, so the
+	// filters below append uniformly. The target filter restricts to
+	// symbols the linker resolved into that target (link_resolutions
+	// rows), covering both defined-here and pulled-from-archive cases.
 	if target != "" {
 		sqlText += ` AND EXISTS (
 			SELECT 1 FROM link_resolutions lr
@@ -131,13 +164,41 @@ func (s *Server) handleFindSymbol(_ context.Context, req mcp.CallToolRequest) (*
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	return jsonResult(FindSymbolResponse{
+	resp := FindSymbolResponse{
 		Query:     query,
+		Exact:     exact,
 		FTSQuery:  fts,
 		Hits:      hits,
 		Total:     len(hits),
 		Truncated: truncated,
-	})
+	}
+	if len(hits) == 0 {
+		resp.Note = emptyFindNote(query, target, exact)
+	}
+	return jsonResult(resp)
+}
+
+// emptyFindNote explains a zero-hit result. The failure this exists for
+// is an agent searching for a type or a macro, getting `hits: []`, and
+// concluding the identifier is absent from the codebase — the index
+// simply has no row shape for one. The target caveat rides along
+// because a target-scoped miss has the same ambiguity for a different
+// reason (internal linkage never reaches link_resolutions).
+func emptyFindNote(query, target string, exact bool) string {
+	var b strings.Builder
+	if exact {
+		b.WriteString("No symbol is named " + strconv.Quote(query) + " (matched against symbols.name and linkage_names). ")
+	} else {
+		b.WriteString("No symbol name or signature matched. ")
+	}
+	b.WriteString("This index holds functions and variables only, so a type, macro or enum constant never has a hit here regardless of query — find those in the source plane with search_source.")
+	if target != "" {
+		b.WriteString(" The target filter also excludes internal-linkage symbols, which get no link_resolutions row even when their code is in the binary; re-run without target before concluding absence.")
+	}
+	if !exact {
+		b.WriteString(" For a literal name check rather than a fuzzy one, re-run with exact=true.")
+	}
+	return b.String()
 }
 
 // buildFTSQuery converts a user query into a safe FTS5 MATCH expression.
