@@ -21,6 +21,7 @@ The `.hbr` file is the whole artifact: schema, facts, and compressed source blob
 - **Meson + ninja** — the build itself.
 - **binutils** — `nm` and `objdump` must be on `PATH` at collect time only.
 - **Go ≥ 1.26** to build herbarium from source.
+- **LTO off** in the builddir you index. `-flto` moves the passes herbarium reads into the linker, where GCC deletes the dumps; preflight refuses such a builddir. See [`LTO.md`](LTO.md).
 
 ## Build
 
@@ -126,6 +127,7 @@ Tool descriptions in [`internal/mcp/`](internal/mcp/) are the user-facing contra
 ## Known limitations
 
 - `indirect_call_sites.callee_type` / `.field_hint` are resolved from `DW_AT_call_target` or, where GCC emits none, from the call instruction's relocation. Both routes are x86-64-only. Both decline rather than guess: a computed pointer, or a parameter list whose SysV register assignment can't be replayed (a leading `double` shifts every later argument's register), leaves both columns empty and `resolve_indirect_call` falls back to the full address-taken pool.
+- **`-flto` builds cannot be indexed.** Under LTO the real inliner, IPA-ICF and the callgraph-info dump all run at link time, into a temp directory GCC removes; `-ffat-lto-objects` recovers DWARF and the inline dump but never `.ci`, and what it does recover describes per-TU code the linker then threw away. Preflight refuses, though today it blames the missing flags rather than LTO. [`LTO.md`](LTO.md) has the measurements and what support would require.
 - `list_icf_groups` covers IPA-ICF only (from GCC's `.icf` dumps). Linker-level ICF (`gold`/`lld --icf=all`) is not tracked.
 - `list_entry_points` covers `main` + externally-visible symbols only. `__attribute__((constructor))` and `.init_array` entries aren't classified.
 - `link_resolutions.losing_objects` is broader than a strict map-file impl: nm sees every .o on disk, including archive members ld never pulled in. Read it as "other .o's that also define this symbol", not "candidates ld weighed and rejected".
@@ -157,5 +159,6 @@ testdata/
 
 - [`INSTALL_GUIDE.md`](INSTALL_GUIDE.md) — step-by-step: build, configure Meson, collect, and serve into an MCP client.
 - [`WHEN_TO_USE.md`](WHEN_TO_USE.md) — which questions are worth routing through the index instead of grep.
+- [`LTO.md`](LTO.md) — why an `-flto` builddir is refused, measured against the fixture.
 - [`herbarium-plan.md`](herbarium-plan.md) — the design contract. Read this before making non-trivial changes.
 - [`CLAUDE.md`](CLAUDE.md) — orientation for working in this repo.
